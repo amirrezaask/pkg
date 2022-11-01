@@ -47,16 +47,21 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer enumFile.Close()
 	for _, decl := range fast.Decls {
-		declComment := decl.(*ast.GenDecl).Doc.Text()
-		if len(declComment) > 0 && declComment[:len(ENUM_DECORATOR)] == ENUM_DECORATOR {
-			name := decl.(*ast.GenDecl).Specs[0].(*ast.TypeSpec).Name.String()
-			variants := strings.Split(strings.Trim(declComment[len(ENUM_DECORATOR)+1:], " \n\t\r"), " ")
-			enum := genEnumStruct(fast.Name.String(), name, variants)
-			_, err := fmt.Fprint(enumFile, enum)
-			if err != nil {
-				panic(err)
+		if _, ok := decl.(*ast.GenDecl); ok {
+			declComment := decl.(*ast.GenDecl).Doc.Text()
+			if len(declComment) > 0 && declComment[:len(ENUM_DECORATOR)] == ENUM_DECORATOR {
+				name := decl.(*ast.GenDecl).Specs[0].(*ast.TypeSpec).Name.String()
+				variants := strings.Split(strings.Trim(declComment[len(ENUM_DECORATOR)+1:], " \n\t\r"), " ")
+				enum := genEnumStruct(fast.Name.String(), name, variants)
+				_, err := fmt.Fprint(enumFile, enum)
+				if err != nil {
+					panic(err)
+				}
 			}
 		}
+
 	}
+
 }
