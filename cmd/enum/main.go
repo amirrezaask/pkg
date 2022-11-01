@@ -1,3 +1,11 @@
+/*
+example code:
+```go
+// enum: Started Arrived Finished
+type RideState int
+```
+*/
+
 package main
 
 import (
@@ -6,48 +14,92 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"strings"
+	"text/template"
 )
+
+const usage = `usage:
+	enum <input file that contains enum decorators> 
+`
 
 const (
-	GENERATED_ANNOTATION = "GENERATED USING GOX, DONT EDIT BY HAND"
-	GOX_PREFIX           = "__GOX__"
+	GENERATED_ANNOTATION = "GENERATED USING enum program, DONT EDIT BY HAND"
 	ENUM_PREFIX          = "__ENUM__"
-	ENUM_DECORATOR       = "gox:enum"
+	ENUM_DECORATOR       = "enum"
 )
 
-func genEnumName(name string) string {
-	return fmt.Sprintf("%s%s%s", GOX_PREFIX, ENUM_PREFIX, name)
+const enumTemplate = `
+// {{ .Doc }}
+package {{ .Pkg }}
+
+type {{ .EnumName }} struct {
+	variant string
 }
 
+var (
+	{{ range .Variants }}
+	{{ . }} = {{ $.EnumName }}{"{{ . }}"}
+	{{ end }}
+)
+
+
+func {{ .TypeName }}FromString(s string) {{ .EnumName }} {
+	return {{ .EnumName }}{s}
+}
+`
+
 func genEnumStruct(pkg string, name string, variants []string) string {
-	codename := genEnumName(name)
+	codename := fmt.Sprintf("%s%s", ENUM_PREFIX, name)
 
-	var vars []string
-	for _, v := range variants {
-		vars = append(vars, fmt.Sprintf(`%s = %s{"%s"}`, v, codename, v))
+	type enumStruct struct {
+		Doc      string
+		Pkg      string
+		TypeName string
+		EnumName string
+		Variants []string
 	}
-
-	return fmt.Sprintf(EnumTemplate, GENERATED_ANNOTATION, pkg, codename, strings.Join(vars, "\n"), name, codename, codename)
+	t := template.Must(template.New("enum").Parse(enumTemplate))
+	var buff strings.Builder
+	err := t.Execute(&buff, enumStruct{
+		Doc:      GENERATED_ANNOTATION,
+		Pkg:      pkg,
+		EnumName: codename,
+		TypeName: name,
+		Variants: variants,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return buff.String()
 }
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Print(usage)
+		fmt.Println("")
+		return
+	}
 	filename := os.Args[1]
 
+	inputFilePath, err := filepath.Abs(filename)
+	if err != nil {
+		panic(err)
+	}
+	dir, _ := filepath.Split(inputFilePath)
 	fset := token.NewFileSet()
 	fast, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
 
 	if err != nil {
 		panic(err)
 	}
-
-	// handle enums
-	// for now enums can only be top level
-	enumFile, err := os.Create(fmt.Sprintf("enum_%s", filename))
+	actualName := strings.TrimSuffix(filename, filepath.Ext(filename))
+	outputFilePath := filepath.Join(dir, fmt.Sprintf("%s_enums_gen.go", actualName))
+	outputFile, err := os.Create(outputFilePath)
 	if err != nil {
 		panic(err)
 	}
-	defer enumFile.Close()
+	defer outputFile.Close()
 	for _, decl := range fast.Decls {
 		if _, ok := decl.(*ast.GenDecl); ok {
 			declComment := decl.(*ast.GenDecl).Doc.Text()
@@ -55,7 +107,7 @@ func main() {
 				name := decl.(*ast.GenDecl).Specs[0].(*ast.TypeSpec).Name.String()
 				variants := strings.Split(strings.Trim(declComment[len(ENUM_DECORATOR)+1:], " \n\t\r"), " ")
 				enum := genEnumStruct(fast.Name.String(), name, variants)
-				_, err := fmt.Fprint(enumFile, enum)
+				_, err := fmt.Fprint(outputFile, enum)
 				if err != nil {
 					panic(err)
 				}
