@@ -1,6 +1,6 @@
-//go:generate gox $GOFILE
-
 package main
 
-// @enum Started Arrived Finished
+//go:generate gox $GOFILE
+
+// gox:enum Started Arrived Finished
 type RideState int
