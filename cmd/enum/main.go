@@ -1,10 +1,12 @@
-/*
-example code:
-```go
-// enum: Started Arrived Finished
-type RideState int
-```
-*/
+// enum generates safe, fast enumerationfor your.
+//
+// Usage:
+//
+//	enum $file
+//
+// enum program parses your source code and looks for "enum: variants..." pattern
+// in your decl comments at top level of your file, when found if it's a type declaration
+// it will generate enum code for you.
 
 package main
 
@@ -24,36 +26,56 @@ const usage = `usage:
 `
 
 const (
-	GENERATED_ANNOTATION = "GENERATED USING enum program, DONT EDIT BY HAND"
-	ENUM_PREFIX          = "__ENUM__"
-	ENUM_DECORATOR       = "enum"
+	ENUM_PREFIX    = "__ENUM__"
+	ENUM_DECORATOR = "enum"
 )
 
 const enumTemplate = `
-// {{ .Doc }}
+// GENERATED USING enum program, DONT EDIT BY HAND
 package {{ .Pkg }}
 
-type {{ .EnumName }} struct {
-	variant string
+import "fmt"
+
+type {{ .TypeName }} struct {
+	variant int
 }
 
 var (
-	{{ range .Variants }}
-	{{ . }} = {{ $.EnumName }}{"{{ . }}"}
+	{{ range $index, $variant := .Variants }}
+	{{ $variant }} = {{ $.TypeName }} { {{ $index }} }
 	{{ end }}
 )
 
 
-func {{ .TypeName }}FromString(s string) {{ .EnumName }} {
-	return {{ .EnumName }}{s}
+func {{ .EnumName }}FromString(s string) ({{ .TypeName }}, error) {
+	switch s {
+		{{ range $index, $variant  := .Variants }}
+	case "{{.}}":
+		return {{$.TypeName}}{ {{$index}} }, nil
+	{{ end }}
+	default:
+		return {{.TypeName}}{}, fmt.Errorf("invalid {{.EnumName}} variant: %s", s)
+	}
 }
+
+
+func (e {{.TypeName}}) String() string {
+	switch e.variant {
+		{{ range $index, $variant := .Variants }}
+	case {{$index}}:
+		return "{{$variant}}"
+	{{ end }}
+	default:
+		return ""
+	} 
+}
+
 `
 
 func genEnumStruct(pkg string, name string, variants []string) string {
 	codename := fmt.Sprintf("%s%s", ENUM_PREFIX, name)
 
 	type enumStruct struct {
-		Doc      string
 		Pkg      string
 		TypeName string
 		EnumName string
@@ -62,10 +84,9 @@ func genEnumStruct(pkg string, name string, variants []string) string {
 	t := template.Must(template.New("enum").Parse(enumTemplate))
 	var buff strings.Builder
 	err := t.Execute(&buff, enumStruct{
-		Doc:      GENERATED_ANNOTATION,
 		Pkg:      pkg,
-		EnumName: codename,
-		TypeName: name,
+		EnumName: name,
+		TypeName: codename,
 		Variants: variants,
 	})
 	if err != nil {
