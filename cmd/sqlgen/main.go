@@ -1,8 +1,8 @@
-// dbmodel generates a complete query builder for your model from your code.
+// querygen generates a complete query builder for your model from your code.
 //
 // Usage:
 //
-//	dbmodel $file
+//	sqlgen $file
 //
 
 package main
@@ -20,7 +20,7 @@ import (
 
 const usage = `usage:`
 
-const _DBMODEL_DECORATOR = "dbmodel:"
+const _DBMODEL_DECORATOR = "sqlgen:"
 
 func gen(pkg string, typeName string, fields map[string]string, tags []string, args map[string]string) string {
 	type Struct struct {
@@ -28,7 +28,7 @@ func gen(pkg string, typeName string, fields map[string]string, tags []string, a
 		ModelName string
 		Fields    map[string]string
 	}
-	t := template.Must(template.New("dbmodel").Parse(modelTemplate))
+	t := template.Must(template.New("sqlgen").Parse(modelTemplate))
 	var buff strings.Builder
 	err := t.Execute(&buff, Struct{
 		Pkg:       pkg,
@@ -61,7 +61,7 @@ func main() {
 		panic(err)
 	}
 	actualName := strings.TrimSuffix(filename, filepath.Ext(filename))
-	outputFilePath := filepath.Join(dir, fmt.Sprintf("%s_dbmodel_gen.go", actualName))
+	outputFilePath := filepath.Join(dir, fmt.Sprintf("%s_sqlgen_gen.go", actualName))
 	outputFile, err := os.Create(outputFilePath)
 	if err != nil {
 		panic(err)
@@ -84,8 +84,8 @@ func main() {
 					splitted := strings.Split(argkv, "=")
 					args[splitted[0]] = splitted[1]
 				}
-
-				fmt.Fprint(outputFile, gen(fast.Name.String(), name, fields, nil, args))
+				output := gen(fast.Name.String(), name, fields, nil, args)
+				fmt.Fprint(outputFile, output)
 			}
 		}
 

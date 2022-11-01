@@ -2,7 +2,7 @@
 //
 // Usage:
 //
-//	enum $file
+//	enumgen $GOFILE
 //
 // enum program parses your source code and looks for "enum: variants..." pattern
 // in your decl comments at top level of your file, when found if it's a type declaration
@@ -27,7 +27,7 @@ const usage = `usage:
 
 const (
 	ENUM_PREFIX    = "__ENUM__"
-	ENUM_DECORATOR = "enum"
+	ENUM_DECORATOR = "enumgen"
 )
 
 const enumTemplate = `
@@ -115,7 +115,7 @@ func main() {
 		panic(err)
 	}
 	actualName := strings.TrimSuffix(filename, filepath.Ext(filename))
-	outputFilePath := filepath.Join(dir, fmt.Sprintf("%s_enums_gen.go", actualName))
+	outputFilePath := filepath.Join(dir, fmt.Sprintf("%s_enumgen_gen.go", actualName))
 	outputFile, err := os.Create(outputFilePath)
 	if err != nil {
 		panic(err)
