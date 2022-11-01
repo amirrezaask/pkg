@@ -109,12 +109,31 @@ func (m *{{ $.ModelName }}WhereBuilder) Where{{$field}}({{ $field }} {{ $type }}
 }
 {{ end }}
 
+func (m *{{ $.ModelName }}WhereBuilder) String() string {
+	output := ""
+
+	{{ range $field, $type := .Fields }}
+	if m.{{$field}} != nil {
+		output += fmt.Sprintf("%s = %s", "{{ $field }}", m.{{$field}})
+	}
+	{{ end }}
+
+	if output != "" {
+		return fmt.Sprintf("WHERE %s", output)
+	}
+	return ""
+}
+
 type {{ .ModelName }}QueryBuilder struct {
 	{{ .ModelName }}WhereBuilder
 }
 	
 func Query{{ .ModelName }}() *{{ .ModelName }}QueryBuilder {
 	return &{{ .ModelName }}QueryBuilder{}
+}
+
+func (q *{{.ModelName}}QueryBuilder) String() string {
+	return ""
 }
 	
 type {{ .ModelName }}UpdateBuilder struct {
