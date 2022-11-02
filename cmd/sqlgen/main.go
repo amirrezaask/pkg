@@ -37,6 +37,7 @@ func generate(pkg string, typeName string, fields map[string]string, tags []stri
 
 	err = queryBuilderTemplate.Execute(&buff, queryBuilderTemplateData{
 		ModelName: typeName,
+		Fields:    fields,
 	})
 	if err != nil {
 		panic(err)
@@ -132,16 +133,78 @@ var (
 
 type queryBuilderTemplateData struct {
 	ModelName string
+	Fields    map[string]string
 }
 
 const queryBuilder = `
 type __{{ .ModelName }}SQLQueryBuilder struct {
+	mode string
     where __{{ .ModelName }}Where
 	set __{{ .ModelName }}Set
+	orderby string
+	groupby string
+	args []interface{}
+	table string
+	projected []string
 }
 
-func {{.ModelName}}QueryBuilder() __{{ .ModelName }}SQLQueryBuilder {
-	return __{{ .ModelName }}SQLQueryBuilder{}
+func {{.ModelName}}QueryBuilder() *__{{ .ModelName }}SQLQueryBuilder {
+	return &__{{ .ModelName }}SQLQueryBuilder{}
+}
+
+
+{{ range $field, $type := .Fields }}
+func (q *__{{ $.ModelName}}SQLQueryBuilder) Select{{$field}}() *__{{ $.ModelName }}SQLQueryBuilder {
+	q.projected = append(q.projected, "{{ $field }}")
+	return q
+}
+{{ end }}
+
+func (q *__{{ .ModelName}}SQLQueryBuilder) sqlSelect() (string, []interface{}) {
+	base := fmt.Sprintf("SELECT %s FROM %s", strings.Join(q.projected, ", "), q.table)
+
+	var wheres []string 
+	{{ range $field, $type := .Fields }}
+	if q.where.{{$field}}.operator != "" {
+		wheres = append(wheres, fmt.Sprintf("%s %s %s", {{$field}}, q.where.{{$field}}.operator, q.where.{{$field}}.argument))
+	}
+	{{ end }}
+	if len(wheres) > 0 {
+		base += "WHERE " + strings.Join(wheres, " AND ")
+	}
+	return base, args
+}
+func (q *__{{ .ModelName}}SQLQueryBuilder) sqlUpdate() (string, []interface{}) {
+	base := fmt.Sprintf("UPDATE %s SET %s", q.table)
+
+	var wheres []string 
+	{{ range $field, $type := .Fields }}
+	if q.where.{{$field}}.operator != "" {
+		wheres = append(wheres, fmt.Sprintf("%s %s %s", {{$field}}, q.where.{{$field}}.operator, q.where.{{$field}}.argument))
+	}
+	{{ end }}
+	if len(wheres) > 0 {
+		base += "WHERE " + strings.Join(wheres, " AND ")
+	}
+
+
+	return base, args
+}
+func (q *__{{ .ModelName}}SQLQueryBuilder) sqlUpdate() (string, []interface{}) {
+
+
+}
+
+func (q *__{{ .ModelName }}SQLQueryBuilder) SQL() (string, []interface{}) {
+	if mode == "select" {
+		return q.sqlSelect()
+	} else if mode == "update" {
+		return q.sqlUpdate()
+	} else if mode == "delete" {
+		return q.sqlDelete()
+	} else {
+		panic("unsupported query mode")
+	}
 }
 
 `
@@ -155,22 +218,22 @@ const scalarWhere = `
 {{ range $field, $type := .Fields }}
 {{ if eq $type "int" "int8" "int16" "int32" "int64" "uint8" "uint16" "uint32" "uint64" "uint" "float32" "float64"  }}
 func (m *__{{$.ModelName}}SQLQueryBuilder) Where{{$field}}GE({{$field}} {{$type}}) *__{{$.ModelName}}SQLQueryBuilder {
-	m.where.{{$field}}.argument = &{{$field}}
+	m.where.{{$field}}.argument = {{$field}}
     m.where.{{$field}}.operator = ">="
 	return m
 }
 func (m *__{{$.ModelName}}SQLQueryBuilder) Where{{$field}}GT({{$field}} {{$type}}) *__{{$.ModelName}}SQLQueryBuilder {
-    m.where.{{$field}}.argument = &{{$field}}
+    m.where.{{$field}}.argument = {{$field}}
     m.where.{{$field}}.operator = ">="
 	return m
 }
 func (m *__{{$.ModelName}}SQLQueryBuilder) Where{{$field}}LE({{$field}} {{$type}}) *__{{$.ModelName}}SQLQueryBuilder {
-    m.where.{{$field}}.argument = &{{$field}}
+    m.where.{{$field}}.argument = {{$field}}
     m.where.{{$field}}.operator = "<="
 	return m
 }
 func (m *__{{$.ModelName}}SQLQueryBuilder) Where{{$field}}LT({{$field}} {{$type}}) *__{{$.ModelName}}SQLQueryBuilder {
-    m.where.{{$field}}.argument = &{{$field}}
+    m.where.{{$field}}.argument = {{$field}}
     m.where.{{$field}}.operator = "<="
 	return m
 }
@@ -187,14 +250,14 @@ const eqWhere = `
 type __{{ .ModelName }}Where struct {
 	{{ range $field, $type := .Fields }}
 	{{$field}} struct {
-        argument *{{$type}}
+        argument {{$type}}
         operator string
     }
 	{{ end }}
 }
 {{ range $field, $type := .Fields }}
 func (m *__{{ $.ModelName }}SQLQueryBuilder) Where{{$field}}Eq({{ $field }} {{ $type }}) *__{{ $.ModelName }}SQLQueryBuilder {
-	m.where.{{$field}}.argument = &{{$field}}
+	m.where.{{$field}}.argument = {{$field}}
     m.where.{{$field}}.operator = "="
 	return m
 }
@@ -226,5 +289,7 @@ type baseOutputFileTemplateData struct {
 
 const baseOutputFile = `
 package {{ .Pkg }}
+
+import "fmt"
 
 `
