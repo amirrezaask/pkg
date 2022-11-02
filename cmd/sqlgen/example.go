@@ -1,7 +1,7 @@
 //go:generate sqlgen $GOFILE
 package main
 
-// sqlgen: table=users pk=id
+// sqlgen:
 type User struct {
 	Id   int
 	Name string

@@ -12,26 +12,55 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"html/template"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
 )
 
-const usage = `usage:`
+const annotation = "sqlgen:"
 
-const _DBMODEL_DECORATOR = "sqlgen:"
-
-func gen(pkg string, typeName string, fields map[string]string, tags []string, args map[string]string) string {
-	type Struct struct {
-		Pkg       string
-		ModelName string
-		Fields    map[string]string
-	}
-	t := template.Must(template.New("sqlgen").Parse(modelTemplate))
+func generate(pkg string, typeName string, fields map[string]string, tags []string, args map[string]string) string {
+	// base file
+	// query builder
+	// eq where
+	// scalar where for each field
+	// sets
 	var buff strings.Builder
-	err := t.Execute(&buff, Struct{
-		Pkg:       pkg,
+	err := baseOutputFileTemplate.Execute(&buff, baseOutputFileTemplateData{
+		Pkg: pkg,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	err = queryBuilderTemplate.Execute(&buff, queryBuilderTemplateData{
+		ModelName: typeName,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	err = eqWhereTemplate.Execute(&buff, eqWhereTemplateData{
+		ModelName: typeName,
+		Fields:    fields,
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	err = scalarWhereTemplate.Execute(&buff, scalarWhereTemplateData{
+		ModelName: typeName,
+		Fields:    fields,
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	err = setsTemplate.Execute(&buff, setsTemplateData{
 		ModelName: typeName,
 		Fields:    fields,
 	})
@@ -43,9 +72,7 @@ func gen(pkg string, typeName string, fields map[string]string, tags []string, a
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Print(usage)
-		fmt.Println("")
-		return
+		log.Fatalln("needs a filename")
 	}
 	filename := os.Args[1]
 
@@ -72,9 +99,9 @@ func main() {
 	for _, decl := range fast.Decls {
 		if _, ok := decl.(*ast.GenDecl); ok {
 			declComment := decl.(*ast.GenDecl).Doc.Text()
-			if len(declComment) > 0 && declComment[:len(_DBMODEL_DECORATOR)] == _DBMODEL_DECORATOR {
+			if len(declComment) > 0 && declComment[:len(annotation)] == annotation {
 				name := decl.(*ast.GenDecl).Specs[0].(*ast.TypeSpec).Name.String()
-				arguments := strings.Split(strings.Trim(declComment[len(_DBMODEL_DECORATOR)+1:], " \n\t\r"), " ")
+				// arguments := strings.Split(strings.Trim(declComment[len(annotation)+1:], " \n\t\r"), " ")
 				fields := make(map[string]string)
 				for _, field := range decl.(*ast.GenDecl).Specs[0].(*ast.TypeSpec).Type.(*ast.StructType).Fields.List {
 					for _, name := range field.Names {
@@ -82,11 +109,11 @@ func main() {
 					}
 				}
 				args := make(map[string]string)
-				for _, argkv := range arguments {
-					splitted := strings.Split(argkv, "=")
-					args[splitted[0]] = splitted[1]
-				}
-				output := gen(fast.Name.String(), name, fields, nil, args)
+				// for _, argkv := range arguments {
+				// 	splitted := strings.Split(argkv, "=")
+				// 	args[splitted[0]] = splitted[1]
+				// }
+				output := generate(fast.Name.String(), name, fields, nil, args)
 				fmt.Fprint(outputFile, output)
 			}
 		}
@@ -95,11 +122,19 @@ func main() {
 
 }
 
-const modelTemplate = `
-package {{ .Pkg }}
+var (
+	baseOutputFileTemplate = template.Must(template.New("sqlgen-base").Parse(baseOutputFile))
+	setsTemplate           = template.Must(template.New("sqlgen-sets").Parse(sets))
+	eqWhereTemplate        = template.Must(template.New("sqlgen-eq-where").Parse(eqWhere))
+	scalarWhereTemplate    = template.Must(template.New("sqlgen-scalar-where").Parse(scalarWhere))
+	queryBuilderTemplate   = template.Must(template.New("sqlgen-query-builder").Parse(queryBuilder))
+)
 
-import "fmt"
+type queryBuilderTemplateData struct {
+	ModelName string
+}
 
+const queryBuilder = `
 type __{{ .ModelName }}SQLQueryBuilder struct {
     where __{{ .ModelName }}Where
 	set __{{ .ModelName }}Set
@@ -109,32 +144,15 @@ func {{.ModelName}}QueryBuilder() __{{ .ModelName }}SQLQueryBuilder {
 	return __{{ .ModelName }}SQLQueryBuilder{}
 }
 
-type __{{ .ModelName }}Where struct {
-	{{ range $field, $type := .Fields }}
-	{{$field}} struct {
-        argument *{{$type}}
-        operator string
-    }
-	{{ end }}
+`
+
+type scalarWhereTemplateData struct {
+	ModelName string
+	Fields    map[string]string
 }
 
-type __{{ .ModelName }}Set struct {
-	{{ range $field, $type := .Fields }}
-	{{$field}} *{{$type}}
-	{{ end }}
-}
-
+const scalarWhere = `
 {{ range $field, $type := .Fields }}
-func (m *__{{ $.ModelName }}SQLQueryBuilder) Set{{ $field }}({{ $field }} {{ $type }}) *__{{ $.ModelName }}SQLQueryBuilder {
-	m.set.{{$field}} = &{{ $field }}
-	return m
-}
-
-func (m *__{{ $.ModelName }}SQLQueryBuilder) Where{{$field}}Eq({{ $field }} {{ $type }}) *__{{ $.ModelName }}SQLQueryBuilder {
-	m.where.{{$field}}.argument = &{{$field}}
-    m.where.{{$field}}.operator = "="
-	return m
-}
 {{ if eq $type "int" "int8" "int16" "int32" "int64" "uint8" "uint16" "uint32" "uint64" "uint" "float32" "float64"  }}
 func (m *__{{$.ModelName}}SQLQueryBuilder) Where{{$field}}GE({{$field}} {{$type}}) *__{{$.ModelName}}SQLQueryBuilder {
 	m.where.{{$field}}.argument = &{{$field}}
@@ -157,6 +175,56 @@ func (m *__{{$.ModelName}}SQLQueryBuilder) Where{{$field}}LT({{$field}} {{$type}
 	return m
 }
 {{ end }}
-
 {{ end }}
+`
+
+type eqWhereTemplateData struct {
+	ModelName string
+	Fields    map[string]string
+}
+
+const eqWhere = `
+type __{{ .ModelName }}Where struct {
+	{{ range $field, $type := .Fields }}
+	{{$field}} struct {
+        argument *{{$type}}
+        operator string
+    }
+	{{ end }}
+}
+{{ range $field, $type := .Fields }}
+func (m *__{{ $.ModelName }}SQLQueryBuilder) Where{{$field}}Eq({{ $field }} {{ $type }}) *__{{ $.ModelName }}SQLQueryBuilder {
+	m.where.{{$field}}.argument = &{{$field}}
+    m.where.{{$field}}.operator = "="
+	return m
+}
+{{ end }}
+`
+
+type setsTemplateData struct {
+	ModelName string
+	Fields    map[string]string
+}
+
+const sets = `
+type __{{ .ModelName }}Set struct {
+	{{ range $field, $type := .Fields }}
+	{{$field}} *{{$type}}
+	{{ end }}
+}
+{{ range $field, $type := .Fields }}
+func (m *__{{ $.ModelName }}SQLQueryBuilder) Set{{ $field }}({{ $field }} {{ $type }}) *__{{ $.ModelName }}SQLQueryBuilder {
+	m.set.{{$field}} = &{{ $field }}
+	return m
+}
+{{ end }}
+`
+
+type baseOutputFileTemplateData struct {
+	Pkg string
+}
+
+const baseOutputFile = `
+package {{ .Pkg }}
+
 `
