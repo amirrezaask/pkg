@@ -3,6 +3,7 @@ package main
 
 // sqlgen: table=users pk=id
 type User struct {
-	Id        int
-	Name, Age string
+	Id   int
+	Name string
+	Age  int
 }

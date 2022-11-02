@@ -100,62 +100,63 @@ package {{ .Pkg }}
 
 import "fmt"
 
-type {{ .ModelName }}WhereBuilder struct {
+type __{{ .ModelName }}SQLQueryBuilder struct {
+    where __{{ .ModelName }}Where
+	set __{{ .ModelName }}Set
+}
+
+func {{.ModelName}}QueryBuilder() __{{ .ModelName }}SQLQueryBuilder {
+	return __{{ .ModelName }}SQLQueryBuilder{}
+}
+
+type __{{ .ModelName }}Where struct {
+	{{ range $field, $type := .Fields }}
+	{{$field}} struct {
+        argument *{{$type}}
+        operator string
+    }
+	{{ end }}
+}
+
+type __{{ .ModelName }}Set struct {
 	{{ range $field, $type := .Fields }}
 	{{$field}} *{{$type}}
 	{{ end }}
 }
 
 {{ range $field, $type := .Fields }}
-func (m *{{ $.ModelName }}WhereBuilder) Where{{$field}}({{ $field }} {{ $type }}) *{{ $.ModelName }}WhereBuilder {
-	m.{{$field}} = &{{$field}}
-	return m
-}
-{{ end }}
-
-func (m *{{ $.ModelName }}WhereBuilder) String() string {
-	output := ""
-
-	{{ range $field, $type := .Fields }}
-	if m.{{$field}} != nil {
-		output += fmt.Sprintf("%s = %s", "{{ $field }}", m.{{$field}})
-	}
-	{{ end }}
-
-	if output != "" {
-		return fmt.Sprintf("WHERE %s", output)
-	}
-	return ""
-}
-
-type {{ .ModelName }}QueryBuilder struct {
-	{{ .ModelName }}WhereBuilder
-}
-	
-func Query{{ .ModelName }}() *{{ .ModelName }}QueryBuilder {
-	return &{{ .ModelName }}QueryBuilder{}
-}
-
-func (q *{{.ModelName}}QueryBuilder) String() string {
-	return ""
-}
-	
-type {{ .ModelName }}UpdateBuilder struct {
-	set struct {
-		{{ range $field, $type := .Fields }}
-		{{$field}} *{{$type}}
-		{{ end }}
-	}
-
-	where {{ .ModelName }}WhereBuilder
-}
-{{ range $field, $type := .Fields }}
-func (m *{{ $.ModelName }}UpdateBuilder) Set{{ $field }}({{ $field }} {{ $type }}) *{{ $.ModelName }}UpdateBuilder {
+func (m *__{{ $.ModelName }}SQLQueryBuilder) Set{{ $field }}({{ $field }} {{ $type }}) *__{{ $.ModelName }}SQLQueryBuilder {
 	m.set.{{$field}} = &{{ $field }}
 	return m
 }
-{{ end }}
-type {{ .ModelName }}DeleteBuilder struct {
-	where {{ .ModelName }}WhereBuilder
+
+func (m *__{{ $.ModelName }}SQLQueryBuilder) Where{{$field}}Eq({{ $field }} {{ $type }}) *__{{ $.ModelName }}SQLQueryBuilder {
+	m.where.{{$field}}.argument = &{{$field}}
+    m.where.{{$field}}.operator = "="
+	return m
 }
+{{ if eq $type "int" "int8" "int16" "int32" "int64" "uint8" "uint16" "uint32" "uint64" "uint" "float32" "float64"  }}
+func (m *__{{$.ModelName}}SQLQueryBuilder) Where{{$field}}GE({{$field}} {{$type}}) *__{{$.ModelName}}SQLQueryBuilder {
+	m.where.{{$field}}.argument = &{{$field}}
+    m.where.{{$field}}.operator = ">="
+	return m
+}
+func (m *__{{$.ModelName}}SQLQueryBuilder) Where{{$field}}GT({{$field}} {{$type}}) *__{{$.ModelName}}SQLQueryBuilder {
+    m.where.{{$field}}.argument = &{{$field}}
+    m.where.{{$field}}.operator = ">="
+	return m
+}
+func (m *__{{$.ModelName}}SQLQueryBuilder) Where{{$field}}LE({{$field}} {{$type}}) *__{{$.ModelName}}SQLQueryBuilder {
+    m.where.{{$field}}.argument = &{{$field}}
+    m.where.{{$field}}.operator = "<="
+	return m
+}
+func (m *__{{$.ModelName}}SQLQueryBuilder) Where{{$field}}LT({{$field}} {{$type}}) *__{{$.ModelName}}SQLQueryBuilder {
+    m.where.{{$field}}.argument = &{{$field}}
+    m.where.{{$field}}.operator = "<="
+	return m
+}
+{{ end }}
+
+{{ end }}
 `
