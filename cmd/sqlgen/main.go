@@ -53,7 +53,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	dir, _ := filepath.Split(inputFilePath)
+	pathList := filepath.SplitList(inputFilePath)
+	pathList = pathList[:len(pathList)-1]
+	dir := filepath.Join(pathList...)
 	fset := token.NewFileSet()
 	fast, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
 
@@ -95,6 +97,8 @@ func main() {
 
 const modelTemplate = `
 package {{ .Pkg }}
+
+import "fmt"
 
 type {{ .ModelName }}WhereBuilder struct {
 	{{ range $field, $type := .Fields }}
