@@ -1,14 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"html/template"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,8 +72,6 @@ func main() {
 				fmt.Fprint(outputFile, output)
 			}
 		}
-		var r *http.Request
-		json.NewDecoder(r.Body).Decode()
 	}
 
 }
@@ -88,15 +84,32 @@ type baseOutputFileTemplateData struct {
 	Pkg string
 }
 
-const httpHandler = `
-func {{.Name}}HTTPHandler(w http.ResponseWriter, r *http.Request) {
-    json.NewDecoder(r.Body)
-
+type httpHandlerTemplateData struct {
+	Action string
+	Input  string
+	Output string
 }
-`
 
-const echoHTTPHandler = `
+const httpHandler = `
+func Make{{.Action}}Handler(h func({{.Input}}) ({{.Output}}, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var input {{.Input}}
+		err := json.NewDecoder(r.Body).Decode(&input)
+		if err != nil {
+			panic(err)
+		}
+		resp, err := h(input)
+		if err != nil {
+			panic(err)
+		}
 
+
+		err = json.NewEncoder(w).Encode(resp)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
 `
 
 const baseOutputFile = `
