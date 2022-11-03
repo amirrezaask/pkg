@@ -2,8 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
-	"net/http"
 )
 
 // httpgen: handler user_create input
@@ -20,25 +18,4 @@ type CreateUserResponse struct {
 // httpgen: ctx
 type AppCtx struct {
 	db *sql.DB
-}
-
-// generated
-func MakeCreateUserHandler(h func(CreateUserRequest) (CreateUserResponse, error)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var input CreateUserRequest
-		err := json.NewDecoder(r.Body).Decode(&input)
-		if err != nil {
-			panic(err)
-		}
-
-		resp, err := h(input)
-		if err != nil {
-			panic(err)
-		}
-		err = json.NewEncoder(w).Encode(resp)
-
-		if err != nil {
-			panic(err)
-		}
-	}
 }
