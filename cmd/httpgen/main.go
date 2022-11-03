@@ -85,13 +85,15 @@ type baseOutputFileTemplateData struct {
 }
 
 type httpHandlerTemplateData struct {
-	Action string
-	Input  string
-	Output string
+	Action  string
+	Input   string
+	Output  string
+	WithCtx bool
+	Ctx     string
 }
 
 const httpHandler = `
-func Make{{.Action}}Handler(h func({{.Input}}) ({{.Output}}, error)) http.HandlerFunc {
+func Make{{.Action}}Handler(h func({{if eq .WithCtx true}} {{ .Ctx }} {{ end }}, {{.Input}}) ({{.Output}}, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input {{.Input}}
 		err := json.NewDecoder(r.Body).Decode(&input)
