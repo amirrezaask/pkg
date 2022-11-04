@@ -162,7 +162,20 @@ type UserDeleteBuilder struct {
 ## httpgen
 generates http handlers that do the boring binding and decoding input request stuff.
 let's you write your handlers in this way.
+for now this supports echo and std http.
 ```go
+//go:generate httpgen example.go
+package main
+
+import (
+	"database/sql"
+)
+
+// httpgen: ctx
+type AppCtx struct {
+	db *sql.DB
+}
+
 // httpgen: input UserCreate
 type CreateUserRequest struct {
 	Email    string `json:"email"`
@@ -174,13 +187,11 @@ type CreateUserResponse struct {
 	ID int `json:"id"`
 }
 
-// httpgen: ctx
-type AppCtx struct {
-	db *sql.DB
+// httpgen: handler UserCreate
+func createUser(appCtx *AppCtx, req CreateUserRequest) (CreateUserResponse, error) {
+	return CreateUserResponse{}, nil
 }
 
-
-func UserCreateHandler(appCtx *AppCtx, req CreateUserRequest) (CreateUserResponse, error) {}
 ```
 
 running `go generate` generates following for you.
@@ -191,32 +202,27 @@ package main
 
 import (
 	
-    "net/http"
-	
 	"encoding/json"
 
 	
+	"github.com/labstack/echo/v4"
+	
 )
 
-func MakeUserCreateHandler(appCtx *AppCtx, h func(*AppCtx, CreateUserRequest) (CreateUserResponse, error)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func UserCreateHandler(appCtx *AppCtx) echo.HandlerFunc {
+	return func(c echo.Context) error {
 		var input CreateUserRequest
-		err := json.NewDecoder(r.Body).Decode(&input)
+		err := json.NewDecoder(c.Request().Body).Decode(&input)
+		defer c.Request().Body.Close()
 		if err != nil {
 			panic(err)
 		}
-		resp, err := h(appCtx, input)
+		resp, err := createUser(appCtx, input)
 		if err != nil {
-			panic(err)
+			c.Error(err)
 		}
-
-
-		err = json.NewEncoder(w).Encode(resp)
-		if err != nil {
-			panic(err)
-		}
+		return c.JSON(200, resp)
 	}
 }
-
 
 ```
