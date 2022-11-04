@@ -2,4 +2,4 @@
 package main
 
 // enumgen: Started Arrived Finished
-type RideState int
+type rideState struct{}
