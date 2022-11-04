@@ -4,13 +4,13 @@ import (
 	"database/sql"
 )
 
-// httpgen: handler user_create input
+// httpgen: input UserCreate
 type CreateUserRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
-// httpgen: handler user_create output
+// httpgen: output UserCreate
 type CreateUserResponse struct {
 	ID int `json:"id"`
 }

@@ -14,7 +14,7 @@ import (
 
 const annotation = "httpgen: "
 
-func generate(pkg string, typeName string, fields map[string]string, tags []string, args map[string]string) string {
+func generate(pkg string, action string, appCtx string, inputType string, outputType string) string {
 	var buff strings.Builder
 	err := baseOutputFileTemplate.Execute(&buff, baseOutputFileTemplateData{
 		Pkg: pkg,
@@ -22,7 +22,24 @@ func generate(pkg string, typeName string, fields map[string]string, tags []stri
 	if err != nil {
 		panic(err)
 	}
+
+	err = httpHandlerTemplate.Execute(&buff, httpHandlerTemplateData{
+		Action: action,
+		Input:  inputType,
+		Output: outputType,
+		Ctx:    appCtx,
+	})
+	if err != nil {
+		panic(err)
+	}
+
 	return buff.String()
+}
+
+type action struct {
+	name   string
+	input  string
+	output string
 }
 
 func main() {
@@ -51,33 +68,57 @@ func main() {
 		panic(err)
 	}
 	defer outputFile.Close()
+
+	var ctx string
+	var actions map[string]*action = make(map[string]*action)
+	pkg := fast.Name.String()
+
 	for _, decl := range fast.Decls {
 		if _, ok := decl.(*ast.GenDecl); ok {
 			declComment := decl.(*ast.GenDecl).Doc.Text()
 			if len(declComment) > 0 && declComment[:len(annotation)] == annotation {
 				name := decl.(*ast.GenDecl).Specs[0].(*ast.TypeSpec).Name.String()
-				// arguments := strings.Split(strings.Trim(declComment[len(annotation)+1:], " \n\t\r"), " ")
-				fields := make(map[string]string)
-				for _, field := range decl.(*ast.GenDecl).Specs[0].(*ast.TypeSpec).Type.(*ast.StructType).Fields.List {
-					for _, name := range field.Names {
-						fields[name.String()] = fmt.Sprint(field.Type)
+				arguments := strings.Split(strings.Trim(declComment[len(annotation):], " \n\t\r"), " ")
+				typ := arguments[0]
+				if typ == "ctx" {
+					ctx = name
+				} else if typ == "input" {
+					actionName := arguments[1]
+					if _, exists := actions[actionName]; !exists {
+						actions[actionName] = &action{
+							name:  actionName,
+							input: name,
+						}
 					}
+
+					actions[actionName].input = name
+				} else if typ == "output" {
+					actionName := arguments[1]
+					if _, exists := actions[actionName]; !exists {
+						actions[actionName] = &action{
+							name:   actionName,
+							output: name,
+						}
+					}
+
+					actions[actionName].output = name
+				} else {
+					log.Fatalf("type %s not supported\n", typ)
 				}
-				args := make(map[string]string)
-				// for _, argkv := range arguments {
-				// 	splitted := strings.Split(argkv, "=")
-				// 	args[splitted[0]] = splitted[1]
-				// }
-				output := generate(fast.Name.String(), name, fields, nil, args)
-				fmt.Fprint(outputFile, output)
 			}
 		}
 	}
 
+	for _, action := range actions {
+		fmt.Fprint(outputFile, generate(pkg, action.name, ctx, action.input, action.output))
+	}
+
+	fmt.Printf("%+v\n", actions["UserCreate"])
 }
 
 var (
-	baseOutputFileTemplate = template.Must(template.New("sqlgen-base").Parse(baseOutputFile))
+	baseOutputFileTemplate = template.Must(template.New("httpgen-base").Parse(baseOutputFile))
+	httpHandlerTemplate    = template.Must(template.New("httpgen-base").Parse(httpHandler))
 )
 
 type baseOutputFileTemplateData struct {
@@ -85,22 +126,21 @@ type baseOutputFileTemplateData struct {
 }
 
 type httpHandlerTemplateData struct {
-	Action  string
-	Input   string
-	Output  string
-	WithCtx bool
-	Ctx     string
+	Action string
+	Input  string
+	Output string
+	Ctx    string
 }
 
 const httpHandler = `
-func Make{{.Action}}Handler(h func({{if eq .WithCtx true}} {{ .Ctx }} {{ end }}, {{.Input}}) ({{.Output}}, error)) http.HandlerFunc {
+func Make{{.Action}}Handler(appCtx *{{ .Ctx }}, h func(*{{ .Ctx }}, {{.Input}}) ({{.Output}}, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input {{.Input}}
 		err := json.NewDecoder(r.Body).Decode(&input)
 		if err != nil {
 			panic(err)
 		}
-		resp, err := h(input)
+		resp, err := h(appCtx, input)
 		if err != nil {
 			panic(err)
 		}
@@ -120,8 +160,7 @@ const baseOutputFile = `
 package {{ .Pkg }}
 
 import (
-    "fmt"
-    "strings"
-    "http"
+    "net/http"
+	"encoding/json"
 )
 `
