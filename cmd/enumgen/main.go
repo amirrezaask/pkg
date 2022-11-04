@@ -122,6 +122,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	defer outputFile.Close()
 	for _, decl := range fast.Decls {
 		if _, ok := decl.(*ast.GenDecl); ok {

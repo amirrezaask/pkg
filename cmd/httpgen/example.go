@@ -5,6 +5,11 @@ import (
 	"database/sql"
 )
 
+// httpgen: ctx
+type AppCtx struct {
+	db *sql.DB
+}
+
 // httpgen: input UserCreate
 type CreateUserRequest struct {
 	Email    string `json:"email"`
@@ -16,7 +21,7 @@ type CreateUserResponse struct {
 	ID int `json:"id"`
 }
 
-// httpgen: ctx
-type AppCtx struct {
-	db *sql.DB
+// httpgen: handler UserCreate
+func createUser(appCtx *AppCtx, req CreateUserRequest) (CreateUserResponse, error) {
+	return CreateUserResponse{}, nil
 }

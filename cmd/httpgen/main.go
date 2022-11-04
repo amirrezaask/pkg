@@ -17,7 +17,7 @@ const annotation = "httpgen: "
 
 var mode *string
 
-func generate(pkg string, action string, appCtx string, inputType string, outputType string) string {
+func generate(pkg string, action string, appCtx string, inputType string, outputType string, handler string) string {
 	var buff strings.Builder
 	err := baseOutputFileTemplate.Execute(&buff, baseOutputFileTemplateData{
 		Pkg:  pkg,
@@ -32,6 +32,7 @@ func generate(pkg string, action string, appCtx string, inputType string, output
 			Input:  inputType,
 			Output: outputType,
 			Ctx:    appCtx,
+			Handler: handler,
 		})
 		if err != nil {
 			panic(err)
@@ -42,6 +43,7 @@ func generate(pkg string, action string, appCtx string, inputType string, output
 			Input:  inputType,
 			Output: outputType,
 			Ctx:    appCtx,
+			Handler: handler,
 		})
 		if err != nil {
 			panic(err)
@@ -55,6 +57,7 @@ type action struct {
 	name   string
 	input  string
 	output string
+	handler string
 }
 
 func main() {
@@ -92,9 +95,34 @@ func main() {
 	pkg := fast.Name.String()
 
 	for _, decl := range fast.Decls {
-		if _, ok := decl.(*ast.GenDecl); ok {
+		_, isGenDecl := decl.(*ast.GenDecl)
+		_, isFnDecl := decl.(*ast.FuncDecl)
+		if isFnDecl {
+			declComment := decl.(*ast.FuncDecl).Doc.Text()
+			if len(declComment) > 0 && declComment[:len(annotation)] == annotation {
+				fmt.Println(declComment)
+				name := decl.(*ast.FuncDecl).Name.String()
+				arguments := strings.Split(strings.Trim(declComment[len(annotation):], " \n\t\r"), " ")
+				typ := arguments[0]
+				if typ != "handler" {
+					log.Fatalln("functions can only be handlers.")
+				}
+
+				actionName := arguments[1]
+				if _, exists := actions[actionName]; !exists {
+					actions[actionName] = &action{
+						name:   actionName,
+						handler: name,
+					}
+				}
+
+				actions[actionName].handler = name
+			}
+		}
+		if isGenDecl {
 			declComment := decl.(*ast.GenDecl).Doc.Text()
 			if len(declComment) > 0 && declComment[:len(annotation)] == annotation {
+				fmt.Println(declComment)
 				name := decl.(*ast.GenDecl).Specs[0].(*ast.TypeSpec).Name.String()
 				arguments := strings.Split(strings.Trim(declComment[len(annotation):], " \n\t\r"), " ")
 				typ := arguments[0]
@@ -128,7 +156,7 @@ func main() {
 	}
 
 	for _, action := range actions {
-		fmt.Fprint(outputFile, generate(pkg, action.name, ctx, action.input, action.output))
+		fmt.Fprint(outputFile, generate(pkg, action.name, ctx, action.input, action.output, action.handler))
 	}
 
 	fmt.Printf("%+v\n", actions["UserCreate"])
@@ -150,17 +178,18 @@ type httpHandlerTemplateData struct {
 	Input  string
 	Output string
 	Ctx    string
+	Handler string
 }
 
 const httpHandler = `
-func Make{{.Action}}Handler(appCtx *{{ .Ctx }}, h func(*{{ .Ctx }}, {{.Input}}) ({{.Output}}, error)) http.HandlerFunc {
+func {{.Action}}Handler(appCtx *{{ .Ctx }}) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input {{.Input}}
 		err := json.NewDecoder(r.Body).Decode(&input)
 		if err != nil {
 			panic(err)
 		}
-		resp, err := h(appCtx, input)
+		resp, err := {{ .Handler }}(appCtx, input)
 		if err != nil {
 			panic(err)
 		}
@@ -174,7 +203,7 @@ func Make{{.Action}}Handler(appCtx *{{ .Ctx }}, h func(*{{ .Ctx }}, {{.Input}}) 
 }
 `
 const echoHandler = `
-func Make{{.Action}}Handler(appCtx *{{ .Ctx }}, h func(*{{ .Ctx }}, {{.Input}}) ({{.Output}}, error)) echo.HandlerFunc {
+func {{.Action}}Handler(appCtx *{{ .Ctx }}) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		var input {{.Input}}
 		err := json.NewDecoder(c.Request().Body).Decode(&input)
@@ -182,7 +211,7 @@ func Make{{.Action}}Handler(appCtx *{{ .Ctx }}, h func(*{{ .Ctx }}, {{.Input}}) 
 		if err != nil {
 			panic(err)
 		}
-		resp, err := h(appCtx, input)
+		resp, err := {{ .Handler }}(appCtx, input)
 		if err != nil {
 			c.Error(err)
 		}
