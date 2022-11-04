@@ -1,3 +1,4 @@
+//go:generate httpgen example.go
 package main
 
 import (
