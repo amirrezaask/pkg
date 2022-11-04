@@ -36,31 +36,27 @@ package {{ .Pkg }}
 
 import "fmt"
 
-type {{ .TypeName }} struct {
-	variant int
-}
-
-var (
+const (
 	{{ range $index, $variant := .Variants }}
-	{{$.EnumName}}{{ $variant }} = {{ $.TypeName }} { {{ $index }} }
+	{{ $.EnumName }}{{ $variant }} = {{ $.EnumName }}(2 << {{ $index }})
 	{{ end }}
 )
 
 
-func {{ .EnumName }}FromString(s string) ({{ .TypeName }}, error) {
+func {{ .EnumName }}FromString(s string) ({{ .EnumName }}, error) {
 	switch s {
 		{{ range $index, $variant  := .Variants }}
 	case "{{.}}":
-		return {{$.TypeName}}{ {{$index}} }, nil
+		return {{$.EnumName}}(2 << {{ $index }}), nil
 	{{ end }}
 	default:
-		return {{.TypeName}}{}, fmt.Errorf("invalid {{.EnumName}} variant: %s", s)
+		return {{.EnumName}}(0), fmt.Errorf("invalid {{.EnumName}} variant: %s", s)
 	}
 }
 
 
-func (e {{.TypeName}}) String() string {
-	switch e.variant {
+func (e {{.EnumName}}) String() string {
+	switch e {
 		{{ range $index, $variant := .Variants }}
 	case {{$index}}:
 		return "{{$variant}}"
