@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-const annotation = "httpgen: "
+const annotation = "handler"
 
 var mode *string
 
@@ -90,76 +90,23 @@ func main() {
 	}
 	defer outputFile.Close()
 
-	var ctx string
-	var actions map[string]*action = make(map[string]*action)
 	pkg := fast.Name.String()
-
 	for _, decl := range fast.Decls {
-		_, isGenDecl := decl.(*ast.GenDecl)
 		_, isFnDecl := decl.(*ast.FuncDecl)
 		if isFnDecl {
 			declComment := decl.(*ast.FuncDecl).Doc.Text()
 			if len(declComment) > 0 && declComment[:len(annotation)] == annotation {
-				fmt.Println(declComment)
-				name := decl.(*ast.FuncDecl).Name.String()
-				arguments := strings.Split(strings.Trim(declComment[len(annotation):], " \n\t\r"), " ")
-				typ := arguments[0]
-				if typ != "handler" {
-					log.Fatalln("functions can only be handlers.")
-				}
-
-				actionName := arguments[1]
-				if _, exists := actions[actionName]; !exists {
-					actions[actionName] = &action{
-						name:   actionName,
-						handler: name,
-					}
-				}
-
-				actions[actionName].handler = name
-			}
-		}
-		if isGenDecl {
-			declComment := decl.(*ast.GenDecl).Doc.Text()
-			if len(declComment) > 0 && declComment[:len(annotation)] == annotation {
-				fmt.Println(declComment)
-				name := decl.(*ast.GenDecl).Specs[0].(*ast.TypeSpec).Name.String()
-				arguments := strings.Split(strings.Trim(declComment[len(annotation):], " \n\t\r"), " ")
-				typ := arguments[0]
-				if typ == "ctx" {
-					ctx = name
-				} else if typ == "input" {
-					actionName := arguments[1]
-					if _, exists := actions[actionName]; !exists {
-						actions[actionName] = &action{
-							name:  actionName,
-							input: name,
-						}
-					}
-
-					actions[actionName].input = name
-				} else if typ == "output" {
-					actionName := arguments[1]
-					if _, exists := actions[actionName]; !exists {
-						actions[actionName] = &action{
-							name:   actionName,
-							output: name,
-						}
-					}
-
-					actions[actionName].output = name
-				} else {
-					log.Fatalf("type %s not supported\n", typ)
-				}
-			}
+				fnDecl := decl.(*ast.FuncDecl)
+				handlerName := decl.(*ast.FuncDecl).Name.String()
+				appCtxTypeName := fnDecl.Type.Params.List[0].Type.(*ast.StarExpr).X.(*ast.Ident).Name
+				requestTypeName :=  fnDecl.Type.Params.List[1].Type.(*ast.Ident).Name
+				responseTypeName :=  fnDecl.Type.Results.List[0].Type.(*ast.Ident).Name
+				fmt.Fprint(outputFile, generate(pkg, handlerName, appCtxTypeName, requestTypeName, responseTypeName, handlerName))
+			
 		}
 	}
-
-	for _, action := range actions {
-		fmt.Fprint(outputFile, generate(pkg, action.name, ctx, action.input, action.output, action.handler))
+		
 	}
-
-	fmt.Printf("%+v\n", actions["UserCreate"])
 }
 
 var (
