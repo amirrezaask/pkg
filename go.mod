@@ -8,6 +8,7 @@ require (
 )
 
 require (
+	github.com/gertd/go-pluralize v0.2.1 // indirect
 	github.com/labstack/gommon v0.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.11 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect

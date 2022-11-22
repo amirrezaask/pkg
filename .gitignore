@@ -1,3 +1,4 @@
 .idea
 *_gen*
 enum
+_gen.go
