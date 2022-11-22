@@ -1,5 +1,5 @@
-# tools
-My code generators
+# pkg
+All tools that aren't big enough for a seperate repository, mostly go stuff
 
 ## enumgen
 enumgen generates enum code. for example
@@ -222,7 +222,6 @@ func UserCreateHandler(appCtx *AppCtx) echo.HandlerFunc {
 }
 
 ```
-
 
 ## qbgen
 Stable version of this tool is contributed to [snapp-incubator/crafting-table]("https://github.com/snapp-incubator/crafting-table")
