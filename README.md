@@ -225,5 +225,5 @@ func UserCreateHandler(appCtx *AppCtx) echo.HandlerFunc {
 
 
 ## qbgen
-Stable version of this tool is contributed to [snapp-incubator/crafting-table]("https://github.com/snapp-incubator/crafting-table").
+Stable version of this tool is contributed to [snapp-incubator/crafting-table]("https://github.com/snapp-incubator/crafting-table")
 This one is mostly for ideas.
