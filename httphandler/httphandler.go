@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
 	"github.com/labstack/echo/v4"
 )
 
@@ -33,6 +34,14 @@ var StdCallbacks = Callbacks[*http.Request]{
 var GinCallbacks = Callbacks[*gin.Context]{
 	BodyDecoder: func(req *gin.Context, out any) error {
 		return json.NewDecoder(req.Request.Body).Decode(out)
+	},
+	RespBodyEncoder: json.Marshal,
+	RespErrEncoder:  json.Marshal,
+}
+
+var FiberCallbacks = Callbacks[*fiber.Ctx]{
+	BodyDecoder: func(req *fiber.Ctx, out any) error {
+		return json.Unmarshal(req.Request().Body(), out)
 	},
 	RespBodyEncoder: json.Marshal,
 	RespErrEncoder:  json.Marshal,
@@ -107,5 +116,27 @@ func GinHandler[IN, OUT any](handler func(c *gin.Context, body IN) (int, http.He
 		}
 		bs, _ := EchoCallbacks.RespBodyEncoder(body)
 		c.Writer.Write(bs)
+	}
+}
+
+func FiberHandler[IN, OUT any](handler func(c *fiber.Ctx, body IN) (int, http.Header, OUT, error)) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		var req IN
+		_ = FiberCallbacks.BodyDecoder(c, req)
+		status, headers, body, err := handler(c, req)
+		c.Response().SetStatusCode(status)
+		for k, vs := range headers {
+			for _, v := range vs {
+				c.Response().Header.Add(k, v)
+			}
+		}
+		if err != nil {
+			bs, _ := EchoCallbacks.RespErrEncoder(err)
+			c.Response().BodyWriter().Write(bs)
+			return nil
+		}
+		bs, _ := EchoCallbacks.RespBodyEncoder(body)
+		c.Response().BodyWriter().Write(bs)
+		return nil
 	}
 }
