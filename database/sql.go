@@ -11,6 +11,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/iancoleman/strcase"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -27,8 +28,9 @@ type Sql interface {
 	Query(query string, args ...any) (*sql.Rows, error)
 	Exec(stmt string, args ...any) (sql.Result, error)
 	BeginTx(ctx context.Context, options *sql.TxOptions) (*sql.Tx, error)
+	Begin() (*sql.Tx, error)
 	Save(obj Model) error
-	NOW() string
+	Insert(obj Model) (sql.Result, error)
 	SetDbName(s string)
 	GetDbName() string
 }
@@ -230,6 +232,81 @@ type Schema struct {
 	beforeInsert []func(m Model) error
 }
 
+// func GenerateValueMap(m any) map[string]any {
+// 	v := reflect.ValueOf(m)
+// 	t := reflect.TypeOf(m)
+// 	if t.Kind() == reflect.Pointer {
+// 		t = t.Elem()
+// 	}
+
+// 	output := map[string]any{}
+// 	for i := 0; i < t.NumField(); i++ {
+// 		var column any
+// 		columnPointer := &any{}
+// 	}
+// 	for rows.Next() {
+// 		columns := make([]interface{}, len(columnNames))
+// 		columnPointers := make([]interface{}, len(columnNames))
+// 		for i, _ := range columns {
+// 			columnPointers[i] = &columns[i]
+// 		}
+
+// 		if err := rows.Scan(columnPointers...); err != nil {
+// 			return nil, err
+// 		}
+
+// 		m := make(map[string]interface{})
+// 		for i, colName := range columnNames {
+// 			val := columnPointers[i].(*interface{})
+// 			m[colName] = *val
+// 		}
+// 		result = append(result, m)
+// 	}
+// }
+
+func GenerateFillables(m any) []string {
+	t := reflect.TypeOf(m)
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	var fillables []string
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if strings.ToLower(field.Name) == "id" {
+			continue
+		}
+
+		dTag := field.Tag.Get("database")
+		if strings.Contains(dTag, "pk") {
+			continue
+		}
+		if strings.Contains(dTag, "not-fillable") {
+			continue
+		}
+		fillables = append(fillables, fieldToDbName(field))
+	}
+
+	return fillables
+}
+
+func fieldToDbName(field reflect.StructField) string {
+	name := field.Name
+	dTag := field.Tag.Get("database")
+	colIndex := strings.Index(dTag, "col=")
+	if colIndex != -1 {
+		nameTillEnd := dTag[:colIndex+4]
+		if semiColonIndex := strings.Index(nameTillEnd, ";"); semiColonIndex != -1 {
+			nameTillEnd = nameTillEnd[:semiColonIndex]
+		}
+		name = nameTillEnd
+	}
+
+	name = strcase.ToSnake(name)
+	return name
+}
+
 func MakeSchema() *Schema {
 	return &Schema{
 		valueMap: map[string]any{},
@@ -297,7 +374,11 @@ type Model interface {
 	Schema() *Schema
 }
 
-func Insert[I Model](db *SqlDatabase, obj I) (sql.Result, error) {
+func (db *SqlDatabase) Insert(obj Model) (sql.Result, error) {
+	return Insert(db, obj)
+}
+
+func Insert(db *SqlDatabase, obj Model) (sql.Result, error) {
 	schema := obj.Schema()
 	if err := schema.validate(); err != nil {
 		return nil, errors.Wrap(err, "invalid schema")
@@ -328,29 +409,44 @@ func Insert[I Model](db *SqlDatabase, obj I) (sql.Result, error) {
 }
 
 func (db *SqlDatabase) Save(obj Model) error {
+	return Save(db, obj)
+}
+
+func Save(db *SqlDatabase, obj Model) error {
+	schema := obj.Schema()
+	if err := schema.validate(); err != nil {
+		return errors.Wrap(err, "invalid schema")
+	}
+	for _, bi := range schema.beforeInsert {
+		err := bi(obj)
+		if err != nil {
+			return errors.Wrap(err, "error in running before insert hook %T", obj)
+		}
+	}
+	schema = obj.Schema()
+	table := schema.table
+	columns := schema.fillable
+	values := []any{}
+	updatePairs := []string{}
+	for _, col := range columns {
+		values = append(values, schema.valueMap[col])
+		if db.kind == "mysql" {
+			updatePairs = append(updatePairs, fmt.Sprintf("%s=VALUES(%s)", col, col))
+		} else if db.kind == "postgres" || db.kind == "sqlite" {
+			updatePairs = append(updatePairs, fmt.Sprintf("%s=excluded.%s", col, col))
+		} else {
+			return fmt.Errorf("unsupported database '%s' for generating save query", db.kind)
+		}
+	}
+	if db.kind == "sqlite" || db.kind == "postgres" {
+		values = append(values, schema.pk)
+	}
+	placeholders := strings.Repeat("?,", len(columns)) //TODO: make postgres compatible.
+	placeholders = placeholders[:len(placeholders)-1]
+	var res sql.Result
+	var err error
 	if db.kind == "mysql" {
-		schema := obj.Schema()
-		if err := schema.validate(); err != nil {
-			return errors.Wrap(err, "invalid schema")
-		}
-		for _, bi := range schema.beforeInsert {
-			err := bi(obj)
-			if err != nil {
-				return errors.Wrap(err, "error in running before insert hook %T", obj)
-			}
-		}
-		schema = obj.Schema()
-		table := schema.table
-		columns := schema.fillable
-		values := []any{}
-		updatePairs := []string{}
-		for _, col := range columns {
-			values = append(values, schema.valueMap[col], schema.valueMap[col])
-			updatePairs = append(updatePairs, fmt.Sprintf("%s=?", col))
-		}
-		placeholders := strings.Repeat("?,", len(columns))
-		placeholders = placeholders[:len(placeholders)-1]
-		res, err := db.Exec(
+		res, err = db.Exec(
 			fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s`,
 				table,
 				strings.Join(columns, ","),
@@ -359,85 +455,32 @@ func (db *SqlDatabase) Save(obj Model) error {
 			),
 			values...,
 		)
-
-		if err != nil {
-			return errors.Wrap(err, "cannot save")
-		}
-
-		id, err := res.LastInsertId()
-		if err == nil {
-
-			if schema.pk != nil {
-				*schema.pk = id
-			}
-		}
-
-		return nil
-	} else if db.kind == "sqlite" {
-		schema := obj.Schema()
-		if err := schema.validate(); err != nil {
-			return errors.Wrap(err, "invalid schema")
-		}
-		for _, bi := range schema.beforeInsert {
-			err := bi(obj)
-			if err != nil {
-				return errors.Wrap(err, "error in running before insert hook %T", obj)
-			}
-		}
-		schema = obj.Schema()
-		table := schema.table
-		columns := schema.fillable
-		values := []any{}
-		updatePairs := []string{}
-		updateValues := []any{}
-		for _, col := range columns {
-			values = append(values, schema.valueMap[col])
-			updateValues = append(updateValues, schema.valueMap[col])
-			updatePairs = append(updatePairs, fmt.Sprintf("%s=?", col))
-		}
-		updateValues = append(updateValues, schema.pk)
-
-		placeholders := strings.Repeat("?,", len(columns))
-		placeholders = placeholders[:len(placeholders)-1]
-		query := fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (id) DO UPDATE SET %s WHERE ID=?`,
-			table,
-			strings.Join(columns, ","),
-			placeholders,
-			strings.Join(updatePairs, ","),
+	} else if db.kind == "postgres" || db.kind == "sqlite" {
+		res, err = db.Exec(
+			fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (id) DO UPDATE SET %s WHERE ID=?`,
+				table,
+				strings.Join(columns, ","),
+				placeholders,
+				strings.Join(updatePairs, ","),
+			),
+			values...,
 		)
-
-		res, err := db.Exec(
-			query,
-			append(values, updateValues...)...,
-		)
-
-		if err != nil {
-			return errors.Wrap(err, "cannot save")
-		}
-
-		id, err := res.LastInsertId()
-		if err == nil {
-			if schema.pk != nil {
-				*schema.pk = id
-			}
-		}
-
-		return nil
 	} else {
-		return errors.Newf("save function does not support %s databases yet.", db.kind)
+		return fmt.Errorf("unsupported database '%s' for generating save query", db.kind)
+	}
+
+	if err != nil {
+		return errors.Wrap(err, "cannot save on table %s", table)
+	}
+
+	id, err := res.LastInsertId()
+	if err == nil {
+		if schema.pk != nil {
+			*schema.pk = id
+		}
 	}
 
 	return nil
-}
-
-func (db *SqlDatabase) NOW() string {
-	if db.kind == "mysql" {
-		return "NOW()"
-	} else if db.kind == "sqlite" {
-		return "datetime()"
-	}
-
-	return "NOW()"
 }
 
 func Query[T Model](db *SqlDatabase, q string, args ...any) ([]T, error) {
