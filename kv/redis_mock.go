@@ -1,9 +1,7 @@
-package test
+package kv
 
 import (
 	"time"
-
-	"github.com/amirrezaask/go-sith/database"
 
 	"github.com/go-redis/redismock/v9"
 )
@@ -17,12 +15,13 @@ func (r *redisMock) ExpectLockForKeyWithDuration(key string, dur time.Duration) 
 	r.Regexp().ExpectExists(key).SetVal(0)
 	r.Regexp().ExpectSet(key, 1, dur).SetVal("OK")
 }
+
 func (r *redisMock) ExpectUnlockForKey(key string) {
 	r.Regexp().ExpectDel(key).SetVal(1)
 }
 
-func (t *T) Redis(target **database.Redis) *redisMock {
+func NewRedisMock(target **Redis) *redisMock {
 	client, mock := redismock.NewClientMock()
-	*target = &database.Redis{client}
+	*target = &Redis{client}
 	return &redisMock{mock}
 }

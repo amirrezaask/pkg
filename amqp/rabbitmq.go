@@ -3,8 +3,9 @@ package amqp
 import (
 	"context"
 	"fmt"
-	"github.com/amirrezaask/go-sith/logging"
 	"time"
+
+	"github.com/amirrezaask/go-std/logging"
 
 	"github.com/google/uuid"
 	"github.com/rabbitmq/amqp091-go"

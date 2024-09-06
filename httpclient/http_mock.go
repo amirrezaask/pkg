@@ -1,4 +1,4 @@
-package test
+package httpclient
 
 import (
 	"fmt"
@@ -33,7 +33,7 @@ func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return s.Response, s.Err
 }
 
-func (t *T) HttpClient(target *http.Client) *mockTransport {
+func NewHttpClientMock(target *http.Client) *mockTransport {
 	mock := &mockTransport{}
 	hc := http.Client{Transport: mock}
 	*target = hc

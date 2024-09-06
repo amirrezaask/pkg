@@ -11,24 +11,36 @@ import (
 	"unicode/utf8"
 
 	"github.com/brianvoe/gofakeit/v7"
-	"github.com/go-redis/redismock/v9"
 	"github.com/mitchellh/mapstructure"
 )
 
 type T struct {
 	*testing.T
-	dbs        map[string]*MockDb
-	redisMocks map[string]redismock.ClientMock
-	fakery     *fakery
+	fakery *fakery
 }
 
 func Test(t *testing.T) *T {
 	return &T{
-		T:          t,
-		dbs:        map[string]*MockDb{},
-		redisMocks: map[string]redismock.ClientMock{},
-		fakery:     &fakery{gofakeit.New(0)},
+		T:      t,
+		fakery: &fakery{gofakeit.New(0)},
 	}
+}
+
+func (t *T) Failf(msgAndArgs ...any) {
+	if len(msgAndArgs) < 1 {
+		msgAndArgs = append(msgAndArgs, "Failed")
+	}
+	if _, isString := msgAndArgs[0].(string); !isString {
+		msgAndArgs[0] = fmt.Sprint(msgAndArgs[0])
+	}
+	var args []any
+	if len(msgAndArgs) >= 2 {
+		args = msgAndArgs[1:]
+	}
+	caller := strings.Join(callerInfo(), "\n\t")
+
+	fmt.Printf("\n\n❌ Failed %s => %s\n\nStack: \n\t%s\n\n\n", t.T.Name(), fmt.Sprintf(msgAndArgs[0].(string), args...), caller)
+	t.T.FailNow()
 }
 
 func (t *T) AreNotEqual(expected any, have any, msgAndArgs ...any) {
@@ -42,14 +54,28 @@ func (t *T) AreNotEqual(expected any, have any, msgAndArgs ...any) {
 		msgAndArgs[0] = fmt.Sprint(msgAndArgs[0])
 	}
 	var args []any
-	if len(msgAndArgs) > 2 {
+	if len(msgAndArgs) >= 2 {
 		args = msgAndArgs[1:]
 	}
 	caller := strings.Join(callerInfo(), "\n\t")
 
-	fmt.Printf("\n\n❌ Failed Assert => %s\nexpected '%v'\nhave '%v'\nStack: \n\t%s\n\n\n", fmt.Sprintf(msgAndArgs[0].(string), args...), expected, have, caller)
+	fmt.Printf("\n\n❌ Failed %s Assert => %s\nexpected '%v'\nhave '%v'\nStack: \n\t%s\n\n\n", t.T.Name(), fmt.Sprintf(msgAndArgs[0].(string), args...), expected, have, caller)
 
 	t.T.FailNow()
+}
+
+func (t *T) NotEmpty(obj any, msgAndArgs ...any) {
+	v := reflect.ValueOf(obj)
+	ty := reflect.TypeOf(obj)
+	if ty.Kind() != reflect.Array && ty.Kind() != reflect.Slice && ty.Kind() != reflect.Map {
+		panic(fmt.Sprintf("invalid argument to test.Empty, only Array|Slice|Map not %s", reflect.TypeOf(obj).Kind().String()))
+		t.FailNow()
+	}
+	if len(msgAndArgs) < 1 {
+		msgAndArgs = append(msgAndArgs, "expected empty")
+	}
+
+	t.AreNotEqual(0, v.Len(), msgAndArgs...)
 }
 
 func (t *T) IsEmpty(obj any, msgAndArgs ...any) {
@@ -142,7 +168,7 @@ func (t *T) AssertWeakEq(expected any, have any, msgAndArgs ...any) {
 	if len(msgAndArgs) > 1 {
 		args = msgAndArgs[1:]
 	}
-	fmt.Printf("\n\n❌ Failed Assert => %s\nexpected '%v'\nhave '%v'\nStack: \n\t%s\n\n\n", fmt.Sprintf(msgAndArgs[0].(string), args...), expected, have, caller)
+	fmt.Printf("\n\n❌ Failed %s Assert => %s\nexpected '%v'\nhave '%v'\nStack: \n\t%s\n\n\n", t.T.Name(), fmt.Sprintf(msgAndArgs[0].(string), args...), expected, have, caller)
 	t.T.FailNow()
 }
 func (t *T) AssertEq(expected, have any, msgAndArgs ...any) {
@@ -154,7 +180,8 @@ func (t *T) AssertEq(expected, have any, msgAndArgs ...any) {
 	}
 	t.AssertWeakEq(expected, have, msgAndArgs...)
 }
-func (t *T) HasNoError(err error, msgAndArgs ...any) {
+
+func (t *T) NoError(err error, msgAndArgs ...any) {
 	if len(msgAndArgs) < 1 {
 		msgAndArgs = append(msgAndArgs, "Expected error to be nil")
 	}
@@ -189,13 +216,13 @@ func (t *T) AreSimilar(expected any, have any) {
 	if ev.Kind() == reflect.Slice {
 		if ev.Type().Elem().Kind() != reflect.Map {
 			m := []map[string]any{}
-			t.HasNoError(mapstructure.Decode(expected, &m))
+			t.NoError(mapstructure.Decode(expected, &m))
 			expected = m
 			ev = reflect.ValueOf(ev)
 		}
 		if hv.Type().Elem().Kind() != reflect.Map {
 			m := []map[string]any{}
-			t.HasNoError(mapstructure.Decode(have, &m))
+			t.NoError(mapstructure.Decode(have, &m))
 			have = m
 			hv = reflect.ValueOf(have)
 		}

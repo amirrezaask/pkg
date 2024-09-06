@@ -3,8 +3,9 @@ package amqp
 import (
 	"context"
 	"fmt"
-	"github.com/amirrezaask/go-sith/logging"
 	"time"
+
+	"github.com/amirrezaask/go-std/logging"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"

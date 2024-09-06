@@ -1,9 +1,10 @@
-package database
+package kv
 
 import (
 	"context"
-	"github.com/amirrezaask/go-sith/errors"
 	"time"
+
+	"github.com/amirrezaask/go-std/errors"
 
 	"github.com/redis/go-redis/v9"
 )
