@@ -11,8 +11,8 @@ type fakery struct {
 	*gofakeit.Faker
 }
 
-func (t *T) Fakery() *fakery {
-	return t.fakery
+func Fakery() *fakery {
+	return &fakery{gofakeit.New(0)}
 }
 
 func (f *fakery) FakeNullInt64() sql.NullInt64 {

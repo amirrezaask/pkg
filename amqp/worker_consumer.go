@@ -3,9 +3,8 @@ package amqp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
-
-	"github.com/amirrezaask/go-std/logging"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -78,7 +77,7 @@ func MakeConsumerWithWorkers(
 
 					timer.ObserveDuration()
 					if err != nil {
-						logging.Error("cannot process delivery",
+						slog.Error("cannot process delivery",
 							"queueName", queueName,
 							"err", err,
 						)

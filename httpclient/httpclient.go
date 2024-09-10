@@ -37,7 +37,7 @@ type transport struct {
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	startTime := time.Now()
 	resp, err := t.stdTransport.RoundTrip(req)
-	t.httpRequestDurationH.WithLabelValues(req.Method, req.URL.Host, req.URL.Path, resp.Status).Observe(time.Since(startTime).Seconds())
+	t.httpRequestDurationH.WithLabelValues(req.Method, req.URL.Host, req.URL.Path, fmt.Sprint(resp.StatusCode)).Observe(time.Since(startTime).Seconds())
 
 	return resp, err
 }

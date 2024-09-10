@@ -3,11 +3,12 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
+	"github.com/getsentry/sentry-go"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/labstack/echo/v4"
-
 	"go.opentelemetry.io/contrib/instrumentation/github.com/labstack/echo/otelecho"
 )
 
@@ -46,6 +47,24 @@ func StartServer(listenAddr string,
 ) error {
 	e := echo.New()
 	e.JSONSerializer = &jsonIterSerializer{}
+
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			defer func() {
+				r := recover()
+				if r != nil {
+					sentry.CurrentHub().Recover(r)
+					if err, isErr := r.(error); isErr {
+						slog.Error(err.Error(), "panic", true)
+					} else {
+						slog.Error("unknown recover", "recover()", r)
+					}
+				}
+			}()
+
+			return next(c)
+		}
+	})
 
 	for _, opt := range options {
 		opt(e)

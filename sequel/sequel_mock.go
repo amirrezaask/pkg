@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/amirrezaask/go-std/errors"
 
@@ -27,7 +26,7 @@ func (m *MockDb) BeginTx(ctx context.Context, options *sql.TxOptions) (*sql.Tx, 
 	return m.Interface.BeginTx(ctx, options)
 }
 
-func columnInfo(dbKind string, spec ColumnSpec, nullables ...bool) (string, error) {
+func columnInfo(dbKind string, spec columnSpec, nullables ...bool) (string, error) {
 	options := ""
 	var nullable bool
 	var sqlType string
@@ -96,7 +95,7 @@ func columnInfo(dbKind string, spec ColumnSpec, nullables ...bool) (string, erro
 
 	case reflect.Pointer:
 		elemType := spec.Type.Elem()
-		q, err := columnInfo(dbKind, ColumnSpec{
+		q, err := columnInfo(dbKind, columnSpec{
 			Name: spec.Name,
 			Type: elemType,
 			IsPK: spec.IsPK,
@@ -178,8 +177,11 @@ func columnInfo(dbKind string, spec ColumnSpec, nullables ...bool) (string, erro
 	return fmt.Sprintf("`%s` %s %s", spec.Name, sqlType, options), nil
 }
 
-func createMigrationCommand(dbKind string, m Model) string {
-	schema := m.Schema()
+func createMigrationCommand(dbKind string, m Record) string {
+	schema, err := m.SequelRecordSpec().intoInternalRepr()
+	if err != nil {
+		panic(err)
+	}
 	table, columnSpecs := schema.GetColumns()
 	tableName := fmt.Sprintf("`%s`", table)
 	query := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n", tableName)
@@ -215,17 +217,18 @@ func testNoError(t *testing.T, err error, msg string, args ...any) {
 	}
 }
 
-func NewMockDb(t *testing.T, target *Interface, models ...Model) *MockDb {
-	name := fmt.Sprint(time.Now().UnixNano())
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
-	// dsn = fmt.Sprintf("file:%s?cache=shared", name)
+func NewMockDb(t *testing.T, connectionName string, target *Interface, models ...Record) *MockDb {
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", connectionName)
+	// dsn = fmt.Sprintf("file:%s?cache=shared", connectionName)
 	db, err := sql.Open("sqlite3", dsn)
 	testNoError(t, err, "cannot open sqlite3 connection from NewMockDb")
-	sqlDB := FromTestConnection(db, "sqlite3")
+	sqlDB := fromTestConnection(db, "sqlite3")
 	mockDB := &MockDb{
 		Interface: sqlDB,
 	}
 	*target = Interface(mockDB)
+
+	connections[connectionName] = Interface(mockDB)
 
 	for i := 0; i < len(models); i++ {
 		model := models[i]
@@ -258,7 +261,7 @@ func AssertDb(t *testing.T, db Interface, tables ...string) *dbAssertions {
 func (d *dbAssertions) AssertNotEmpty() {
 	rows, err := d.db.Query(fmt.Sprintf("select count(*) from \"%s\"", d.table))
 	testNoError(d.t, err, "error in runnig query for assert not empty")
-
+	defer rows.Close()
 	var count int
 	rows.Next()
 	err = rows.Scan(&count)
@@ -272,6 +275,7 @@ func (d *dbAssertions) AssertNotEmpty() {
 func (d *dbAssertions) AssertEmpty() {
 	rows, err := d.db.Query(fmt.Sprintf("select count(*) from \"%s\"", d.table))
 	testNoError(d.t, err, "error in running query for AssertNotEmpty")
+	defer rows.Close()
 
 	var count int
 	if !rows.Next() {
@@ -323,6 +327,7 @@ func (d *dbAssertions) countForKvs(kvs ...any) (query string, m map[string]any, 
 	query = fmt.Sprintf("SELECT COUNT(*) FROM \"%s\" WHERE %s", d.table, strings.Join(pairs, " AND "))
 	rows, err := d.db.Query(query, values...)
 	testNoError(d.t, err, "error in running query for count of kvs")
+	defer rows.Close()
 	rows.Next()
 
 	err = rows.Scan(&count)
@@ -335,6 +340,7 @@ func (d *dbAssertions) AssertHas(kvs ...any) *dbAssertions {
 	query, m, count := d.countForKvs(kvs...)
 	if count < 1 {
 		d.t.Logf("For query '%s'\n%+v\nexpected at least one record but there was none", query, m)
+		d.t.FailNow()
 	}
 
 	return d

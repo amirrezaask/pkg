@@ -2,6 +2,7 @@ package kv
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/amirrezaask/go-std/errors"
@@ -13,6 +14,14 @@ import (
 
 type Redis struct {
 	*redis.Client
+}
+
+type RedisConfig struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	DB       int
 }
 
 func (r *Redis) SimpleUnlock(ctx context.Context, key string) error {
@@ -31,13 +40,12 @@ func (r *Redis) SimpleLock(ctx context.Context, key string, dur time.Duration) e
 	return r.Set(ctx, key, 1, dur).Err()
 }
 
-func NewRedis(ctx context.Context, hostPort string, db int,
-	username string, password string) (*Redis, error) {
+func NewRedis(ctx context.Context, c RedisConfig) (*Redis, error) {
 	client := redis.NewClient(&redis.Options{
-		Addr:     hostPort,
-		DB:       db,
-		Username: username,
-		Password: password,
+		Addr:     fmt.Sprintf("%s:%d", c.Host, c.Port),
+		DB:       c.DB,
+		Username: c.Username,
+		Password: c.Password,
 	})
 	statusCmd := client.Ping(ctx)
 	if err := statusCmd.Err(); err != nil {

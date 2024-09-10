@@ -5,28 +5,16 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/brianvoe/gofakeit/v7"
 	"github.com/mitchellh/mapstructure"
 )
 
-type T struct {
-	*testing.T
-	fakery *fakery
-}
-
-func Test(t *testing.T) *T {
-	return &T{
-		T:      t,
-		fakery: &fakery{gofakeit.New(0)},
-	}
-}
-
-func (t *T) Failf(msgAndArgs ...any) {
+func Failf(t *testing.T, msgAndArgs ...any) {
 	if len(msgAndArgs) < 1 {
 		msgAndArgs = append(msgAndArgs, "Failed")
 	}
@@ -39,11 +27,11 @@ func (t *T) Failf(msgAndArgs ...any) {
 	}
 	caller := strings.Join(callerInfo(), "\n\t")
 
-	fmt.Printf("\n\n❌ Failed %s => %s\n\nStack: \n\t%s\n\n\n", t.T.Name(), fmt.Sprintf(msgAndArgs[0].(string), args...), caller)
-	t.T.FailNow()
+	fmt.Printf("\n\n❌ Failed %s => %s\n\nStack: \n\t%s\n\n\n", t.Name(), fmt.Sprintf(msgAndArgs[0].(string), args...), caller)
+	t.FailNow()
 }
 
-func (t *T) AreNotEqual(expected any, have any, msgAndArgs ...any) {
+func AreNotEqual(t *testing.T, expected any, have any, msgAndArgs ...any) {
 	if !ObjectsAreEqualValues(expected, have) {
 		return
 	}
@@ -59,12 +47,42 @@ func (t *T) AreNotEqual(expected any, have any, msgAndArgs ...any) {
 	}
 	caller := strings.Join(callerInfo(), "\n\t")
 
-	fmt.Printf("\n\n❌ Failed %s Assert => %s\nexpected '%v'\nhave '%v'\nStack: \n\t%s\n\n\n", t.T.Name(), fmt.Sprintf(msgAndArgs[0].(string), args...), expected, have, caller)
+	fmt.Printf("\n\n❌ Failed %s\n\tAsserts => %s\nexpected not '%v'\nhave '%v'\nStack: \n\t%s\n\n\n", t.Name(), fmt.Sprintf(msgAndArgs[0].(string), args...), expected, have, caller)
 
-	t.T.FailNow()
+	t.FailNow()
 }
 
-func (t *T) NotEmpty(obj any, msgAndArgs ...any) {
+func AssertEq(t *testing.T, expected, have any, msgAndArgs ...any) {
+	if len(msgAndArgs) < 1 {
+		msgAndArgs = append(msgAndArgs, "Assertion failed due to type mismatch")
+	}
+	if reflect.TypeOf(expected) != reflect.TypeOf(have) {
+		fmt.Printf("[%s] %s: expected('%T') have('%T')", t.Name(), fmt.Sprint(msgAndArgs[0]), expected, have)
+	}
+	AssertWeakEq(t, expected, have, msgAndArgs...)
+}
+func AssertWeakEq(t *testing.T, expected any, have any, msgAndArgs ...any) {
+
+	if ObjectsAreEqualValues(expected, have) {
+		return
+	}
+	caller := strings.Join(callerInfo(), "\n\t")
+
+	if len(msgAndArgs) < 1 {
+		msgAndArgs = append(msgAndArgs, "Assertion failed")
+	}
+	if _, isString := msgAndArgs[0].(string); !isString {
+		msgAndArgs[0] = fmt.Sprint(msgAndArgs[0])
+	}
+	var args []any
+	if len(msgAndArgs) > 1 {
+		args = msgAndArgs[1:]
+	}
+	fmt.Printf("\n\n❌ Failed %s\n\tAsserts => %s\nexpected '%v'\nhave '%v'\nStack: \n\t%s\n\n\n", t.Name(), fmt.Sprintf(msgAndArgs[0].(string), args...), expected, have, caller)
+	t.FailNow()
+}
+
+func NotEmpty(t *testing.T, obj any, msgAndArgs ...any) {
 	v := reflect.ValueOf(obj)
 	ty := reflect.TypeOf(obj)
 	if ty.Kind() != reflect.Array && ty.Kind() != reflect.Slice && ty.Kind() != reflect.Map {
@@ -75,10 +93,10 @@ func (t *T) NotEmpty(obj any, msgAndArgs ...any) {
 		msgAndArgs = append(msgAndArgs, "expected empty")
 	}
 
-	t.AreNotEqual(0, v.Len(), msgAndArgs...)
+	AreNotEqual(t, 0, v.Len(), msgAndArgs...)
 }
 
-func (t *T) IsEmpty(obj any, msgAndArgs ...any) {
+func IsEmpty(t *testing.T, obj any, msgAndArgs ...any) {
 	v := reflect.ValueOf(obj)
 	ty := reflect.TypeOf(obj)
 	if ty.Kind() != reflect.Array && ty.Kind() != reflect.Slice && ty.Kind() != reflect.Map {
@@ -89,8 +107,9 @@ func (t *T) IsEmpty(obj any, msgAndArgs ...any) {
 		msgAndArgs = append(msgAndArgs, "expected empty")
 	}
 
-	t.AssertEq(0, v.Len(), msgAndArgs...)
+	AssertEq(t, 0, v.Len(), msgAndArgs...)
 }
+
 func ObjectsAreEqualValues(expected, actual interface{}) bool {
 	if ObjectsAreEqual(expected, actual) {
 		return true
@@ -151,78 +170,49 @@ func ObjectsAreEqual(expected, actual interface{}) bool {
 	}
 	return bytes.Equal(exp, act)
 }
-func (t *T) AssertWeakEq(expected any, have any, msgAndArgs ...any) {
 
-	if ObjectsAreEqualValues(expected, have) {
-		return
-	}
-	caller := strings.Join(callerInfo(), "\n\t")
-
-	if len(msgAndArgs) < 1 {
-		msgAndArgs = append(msgAndArgs, "Assertion failed")
-	}
-	if _, isString := msgAndArgs[0].(string); !isString {
-		msgAndArgs[0] = fmt.Sprint(msgAndArgs[0])
-	}
-	var args []any
-	if len(msgAndArgs) > 1 {
-		args = msgAndArgs[1:]
-	}
-	fmt.Printf("\n\n❌ Failed %s Assert => %s\nexpected '%v'\nhave '%v'\nStack: \n\t%s\n\n\n", t.T.Name(), fmt.Sprintf(msgAndArgs[0].(string), args...), expected, have, caller)
-	t.T.FailNow()
-}
-func (t *T) AssertEq(expected, have any, msgAndArgs ...any) {
-	if len(msgAndArgs) < 1 {
-		msgAndArgs = append(msgAndArgs, "Assertion failed due to type mismatch")
-	}
-	if reflect.TypeOf(expected) != reflect.TypeOf(have) {
-		fmt.Printf("[%s] %s: expected('%T') have('%T')", t.T.Name(), fmt.Sprint(msgAndArgs[0]), expected, have)
-	}
-	t.AssertWeakEq(expected, have, msgAndArgs...)
-}
-
-func (t *T) NoError(err error, msgAndArgs ...any) {
+func NoError(t *testing.T, err error, msgAndArgs ...any) {
 	if len(msgAndArgs) < 1 {
 		msgAndArgs = append(msgAndArgs, "Expected error to be nil")
 	}
-	t.AssertWeakEq(nil, err, msgAndArgs...)
+	AssertWeakEq(t, nil, err, msgAndArgs...)
 }
-func (t *T) HasError(err error, msgAndArgs ...any) {
+func HasError(t *testing.T, err error, msgAndArgs ...any) {
 	if len(msgAndArgs) < 1 {
 		msgAndArgs = append(msgAndArgs, "Expected error to not be nil")
 	}
-	t.AreNotEqual(nil, err, msgAndArgs...)
+	AreNotEqual(t, nil, err, msgAndArgs...)
 }
 
-func (t *T) IsFalse(b bool, msgAndArgs ...any) {
-	t.AssertEq(false, b, msgAndArgs...)
+func IsFalse(t *testing.T, b bool, msgAndArgs ...any) {
+	AssertEq(t, false, b, msgAndArgs...)
 }
-func (t *T) IsTrue(b bool, msgAndArgs ...any) {
-	t.AssertEq(true, b, msgAndArgs...)
+func IsTrue(t *testing.T, b bool, msgAndArgs ...any) {
+	AssertEq(t, true, b, msgAndArgs...)
 }
 
-func (t *T) eqaulValues(expected any, have any) bool { //TODO:
+func eqaulValues(t *testing.T, expected any, have any) bool { //TODO:
 	eql := reflect.DeepEqual(expected, have)
 
 	return eql
 }
 
-func (t *T) AreSimilar(expected any, have any) {
+func AreSimilar(t *testing.T, expected any, have any) {
 	hv := reflect.ValueOf(have)
 	ev := reflect.ValueOf(expected)
-	t.AssertWeakEq(ev.Kind(), hv.Kind(), "expected and have must have similar kind")
+	AssertWeakEq(t, ev.Kind(), hv.Kind(), "expected and have must have similar kind")
 
-	t.AssertWeakEq(ev.Len(), hv.Len(), "expected and have must have equal len")
+	AssertWeakEq(t, ev.Len(), hv.Len(), "expected and have must have equal len")
 	if ev.Kind() == reflect.Slice {
 		if ev.Type().Elem().Kind() != reflect.Map {
 			m := []map[string]any{}
-			t.NoError(mapstructure.Decode(expected, &m))
+			NoError(t, mapstructure.Decode(expected, &m))
 			expected = m
 			ev = reflect.ValueOf(ev)
 		}
 		if hv.Type().Elem().Kind() != reflect.Map {
 			m := []map[string]any{}
-			t.NoError(mapstructure.Decode(have, &m))
+			NoError(t, mapstructure.Decode(have, &m))
 			have = m
 			hv = reflect.ValueOf(have)
 		}
@@ -232,9 +222,9 @@ func (t *T) AreSimilar(expected any, have any) {
 
 			for _, k := range ev.Index(i).MapKeys() {
 				haveValue := hi.MapIndex(k)
-				t.IsTrue(haveValue.IsValid(), "expected key '%s' exist but it wasn't:", k.Interface())
+				IsTrue(t, haveValue.IsValid(), "expected key '%s' exist but it wasn't:", k.Interface())
 				expectedValue := ei.MapIndex(k)
-				t.AssertWeakEq(expectedValue.Interface(), haveValue.Interface(), "expected same value for key '%s'", k.Interface())
+				AssertWeakEq(t, expectedValue.Interface(), haveValue.Interface(), "expected same value for key '%s'", k.Interface())
 			}
 		}
 	}
@@ -306,6 +296,6 @@ func callerInfo() []string {
 			break
 		}
 	}
-
+	slices.Reverse(callers)
 	return callers
 }

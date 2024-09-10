@@ -3,9 +3,8 @@ package amqp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
-
-	"github.com/amirrezaask/go-std/logging"
 
 	"github.com/google/uuid"
 	"github.com/rabbitmq/amqp091-go"
@@ -24,7 +23,7 @@ func NewRabbitConnection(rabbitURI string) (*RabbitConnection, error) {
 
 	conn, err := amqp091.DialConfig(rabbitURI, cfg)
 	if err != nil {
-		logging.Error("cannot connect to rabbit", "err", err)
+		slog.Error("cannot connect to rabbit", "err", err)
 		return nil, err
 	}
 
@@ -34,13 +33,13 @@ func NewRabbitConnection(rabbitURI string) (*RabbitConnection, error) {
 func (rp *RabbitConnection) PublishContext(ctx context.Context, exchange string, key string, msg []byte) error {
 	ch, err := rp.Conn.Channel()
 	if err != nil {
-		logging.Error("cannot create channel from rabbit mq connection", "err", err)
+		slog.Error("cannot create channel from rabbit mq connection", "err", err)
 		return err
 	}
 	defer func() {
 		err := ch.Close()
 		if err != nil {
-			logging.Error("cannot close channel from rabbit mq connection", "err", err)
+			slog.Error("cannot close channel from rabbit mq connection", "err", err)
 		}
 	}()
 
@@ -57,25 +56,25 @@ func (rp *RabbitConnection) ConsumeContext(ctx context.Context, appName string, 
 ) (<-chan amqp091.Delivery, error) {
 	ch, err := rp.Conn.Channel()
 	if err != nil {
-		logging.Error("cannot create channel from rabbit mq connection", "err", err)
+		slog.Error("cannot create channel from rabbit mq connection", "err", err)
 		return nil, err
 	}
 	// defer func() {
 	// 	err := ch.Close()
 	// 	if err != nil {
-	// 		logging.Error("cannot close channel from rabbit mq connection", "err", err)
+	// 		slog.Error("cannot close channel from rabbit mq connection", "err", err)
 	// 	}
 	// }()
 
 	_, err = ch.QueueDeclare(queueName, true, false, false, false, amqp091.Table{})
 	if err != nil {
-		logging.Error("cannot declare rabbit queue", "err", err)
+		slog.Error("cannot declare rabbit queue", "err", err)
 		return nil, err
 	}
 
 	err = ch.QueueBind(queueName, routingKey, exchangeName, false, amqp091.Table{})
 	if err != nil {
-		logging.Error("cannot bind rabbit queue", "err", err)
+		slog.Error("cannot bind rabbit queue", "err", err)
 		return nil, err
 	}
 	if prefetch != 0 {
@@ -86,7 +85,7 @@ func (rp *RabbitConnection) ConsumeContext(ctx context.Context, appName string, 
 		)
 
 		if err != nil {
-			logging.Error("cannot set qos (prefetch) rabbit queue", "err", err)
+			slog.Error("cannot set qos (prefetch) rabbit queue", "err", err)
 			return nil, err
 		}
 	}
@@ -98,7 +97,7 @@ func (rp *RabbitConnection) ConsumeContext(ctx context.Context, appName string, 
 		false,
 		amqp091.Table{})
 	if err != nil {
-		logging.Error("cannot consume rabbit queue", "err", err)
+		slog.Error("cannot consume rabbit queue", "err", err)
 		return nil, err
 	}
 

@@ -6,7 +6,13 @@ import (
 	"runtime"
 )
 
-var RuntimeFileInfo = false
+func addRuntimeInfo(s *string) {
+	pc, file, line, ok := runtime.Caller(1)
+	if ok && s != nil {
+		f := runtime.FuncForPC(pc)
+		*s += fmt.Sprintf(" [function='%s' file='%s' line=%d]", f.Name(), file, line)
+	}
+}
 
 func As(err error, target any) bool {
 	return stdErr.As(err, target)
@@ -20,10 +26,12 @@ func Join(errs ...error) error {
 }
 
 func New(text string) error {
+	addRuntimeInfo(&text)
 	return stdErr.New(text)
 }
 
 func Newf(text string, args ...any) error {
+	addRuntimeInfo(&text)
 	return fmt.Errorf(text, args...)
 }
 
@@ -35,15 +43,7 @@ func Wrap(err error, msg string, args ...any) error {
 	if err == nil {
 		return err
 	}
-	if RuntimeFileInfo {
-		pc, file, line, ok := runtime.Caller(1)
-		if ok {
-			msg += " function=%s file=%s line=%d"
-			rf := runtime.FuncForPC(pc)
-			args = append(args, rf.Name(), file, line)
-		}
-	}
-
+	addRuntimeInfo(&msg)
 	msg += ": %w"
 	args = append(args, err)
 

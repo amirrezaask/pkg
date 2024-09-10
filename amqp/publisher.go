@@ -3,9 +3,8 @@ package amqp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
-
-	"github.com/amirrezaask/go-std/logging"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -34,10 +33,10 @@ func NewAMQPPublisher(appName string, name string, rabbitMQURI string) Publisher
 	durationHistogram := promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: appName,
-			Name:      "amqp_publisher_%s",
+			Name:      fmt.Sprintf("amqp_publisher_%s", name),
 			Help:      "",
 			Buckets:   prometheusDurationBuckets,
-		}, []string{"exchange", "routing-key"})
+		}, []string{"exchange", "routing_key"})
 
 	a.durationHistogram = durationHistogram
 
@@ -50,11 +49,11 @@ func NewAMQPPublisher(appName string, name string, rabbitMQURI string) Publisher
 		}
 		conn, err = amqp091.DialConfig(rabbitMQURI, cfg)
 		if err != nil {
-			logging.Error("cannot connect to rabbit", "err", err)
+			slog.Error("cannot connect to rabbit", "err", err)
 			for range time.NewTicker(time.Second * 1).C {
 				conn, err = amqp091.DialConfig(rabbitMQURI, cfg)
 				if err != nil {
-					logging.Error("cannot connect to rabbit", "err", err)
+					slog.Error("cannot connect to rabbit", "err", err)
 					continue
 				}
 				break
@@ -80,7 +79,7 @@ func NewAMQPPublisher(appName string, name string, rabbitMQURI string) Publisher
 					timer.ObserveDuration()
 					ch, err := conn.Channel()
 					if err != nil {
-						logging.Error("cannot get amqp channel in handling publishing channel", "err", err)
+						slog.Error("cannot get amqp channel in handling publishing channel", "err", err)
 						time.Sleep(time.Second * 1)
 						go a.Publish(p.Exchange, p.Key, p.Message)
 						restartConnection()
@@ -91,7 +90,7 @@ func NewAMQPPublisher(appName string, name string, rabbitMQURI string) Publisher
 						Body:      p.Message,
 					})
 					if err != nil {
-						logging.Error("error in publishing into amqp", "err", err)
+						slog.Error("error in publishing into amqp", "err", err)
 					}
 				}()
 

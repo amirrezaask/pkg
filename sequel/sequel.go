@@ -6,19 +6,19 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"os"
-	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/amirrezaask/go-std/dump"
 	"github.com/amirrezaask/go-std/errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
+
+var connections = map[string]Interface{}
 
 type metrics struct {
 	QueryHV *prometheus.HistogramVec
@@ -33,11 +33,24 @@ type Interface interface {
 	BeginTx(ctx context.Context, options *sql.TxOptions) (*sql.Tx, error)
 	Begin() (*sql.Tx, error)
 	Driver() driver.Driver
+	Close() error
+}
+
+type DataSource struct {
+	Driver                string
+	Name                  string
+	ConnectionString      string
+	MetricsNamespace      string
+	MaxOpenConnections    int
+	MaxIdleConnections    int
+	IdleConnectionTimeout time.Duration
+	OpenConnectionTimeout time.Duration
 }
 
 const (
-	sqlite = "sqlite3"
-	mysql  = "mysql"
+	sqlite   = "sqlite3"
+	mysql    = "mysql"
+	postgres = "postgres"
 )
 
 func getDriver(s Interface) string {
@@ -53,9 +66,9 @@ func getDriver(s Interface) string {
 
 type database struct {
 	Interface
-	DbName  string
-	metrics *metrics
-	debug   bool
+	connectionName string
+	metrics        *metrics
+	debug          bool
 }
 
 type ConnectionOptions struct {
@@ -67,22 +80,24 @@ type ConnectionOptions struct {
 }
 
 func isDebug(s Interface) bool {
-	if our, isOurSql := s.(*database); isOurSql {
-
-		return our.debug || os.Getenv("SEQUEL_DBG") == "true"
-	} else {
-		return false
+	if os.Getenv("SEQUEL_DBG") == "true" {
+		return true
 	}
+	if our, isOurSql := s.(*database); isOurSql {
+		return our.debug
+	}
+
+	return false
 }
 
-func FromTestConnection(conn *sql.DB, kind string) *database {
+func fromTestConnection(conn *sql.DB, kind string) *database {
 	return &database{
 		Interface: conn,
 	}
 }
 
-func New(driver string, connectionString string, dbName string, options ConnectionOptions) (*database, error) {
-	db, err := sql.Open(driver, connectionString)
+func New(ds DataSource) (Interface, error) {
+	db, err := sql.Open(ds.Driver, ds.ConnectionString)
 	if err != nil {
 		return nil, err
 	}
@@ -90,43 +105,50 @@ func New(driver string, connectionString string, dbName string, options Connecti
 		return nil, err
 	}
 
-	db.SetConnMaxLifetime(options.OpenConnectionTimeout)
-	db.SetConnMaxIdleTime(options.IdleConnectionTimeout)
-	db.SetMaxIdleConns(options.MaxIdleConnections)
-	db.SetMaxOpenConns(options.MaxOpenConnections)
+	db.SetConnMaxLifetime(ds.OpenConnectionTimeout)
+	db.SetConnMaxIdleTime(ds.IdleConnectionTimeout)
+	db.SetMaxIdleConns(ds.MaxIdleConnections)
+	db.SetMaxOpenConns(ds.MaxOpenConnections)
 
-	hist := promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace: options.PromNS,
-		Name:      fmt.Sprintf("%s_db_query_duration_seconds", dbName),
-		Help:      "Database query durations by [dbName] [query]",
-		Buckets: []float64{
-			0.0005,
-			0.001, // 1ms
-			0.002,
-			0.005,
-			0.01, // 10ms
-			0.02,
-			0.05,
-			0.1, // 100 ms
-			0.2,
-			0.5,
-			1.0, // 1s
-			2.0,
-			5.0,
-			10.0, // 10s
-			15.0,
-			20.0,
-			30.0,
-		},
-	}, []string{"dbName", "goCall", "type", "table"})
+	var hist *prometheus.HistogramVec
+	if !testing.Testing() {
+		hist = promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: ds.MetricsNamespace,
+			Name:      fmt.Sprintf("%s_db_query_duration_seconds", ds.Name),
+			Help:      "Database query durations by [dbName] [query]",
+			Buckets: []float64{
+				0.0005,
+				0.001, // 1ms
+				0.002,
+				0.005,
+				0.01, // 10ms
+				0.02,
+				0.05,
+				0.1, // 100 ms
+				0.2,
+				0.5,
+				1.0, // 1s
+				2.0,
+				5.0,
+				10.0, // 10s
+				15.0,
+				20.0,
+				30.0,
+			},
+		}, []string{"dbName", "goCall", "type", "table"})
+	}
 
-	return &database{
-		Interface: db,
-		DbName:    dbName,
+	d := &database{
+		Interface:      db,
+		connectionName: ds.Name,
 		metrics: &metrics{
 			QueryHV: hist,
 		},
-	}, nil
+	}
+
+	connections[ds.Name] = d
+
+	return d, nil
 }
 
 func extractQueryInfo(query string) (queryType, tableName string) {
@@ -226,17 +248,7 @@ func callerInfo() []string {
 				callers = append(callers, fmt.Sprintf("%s:%d", file, line))
 			}
 		}
-
-		// // Drop the package
-		// segments := strings.Split(name, ".")
-		// name = segments[len(segments)-1]
-		// if isTest(name, "Test") ||
-		// 	isTest(name, "Benchmark") ||
-		// 	isTest(name, "Example") {
-		// 	break
-		// }
 	}
-
 	return callers
 }
 
@@ -271,21 +283,24 @@ func (db *database) ExecContext(ctx context.Context, query string, args ...any) 
 		debugLog(query)
 		// dump.This(args)
 	}
-	if db.metrics == nil {
+	if db.metrics == nil || db.metrics.QueryHV == nil {
 		return db.Interface.ExecContext(ctx, query, args...)
 	}
 	queryType, table := extractQueryInfo(query)
-	timer := prometheus.NewTimer(db.metrics.QueryHV.WithLabelValues(db.DbName, "ExecContext", queryType, table))
+	timer := prometheus.NewTimer(db.metrics.QueryHV.WithLabelValues(db.connectionName, strings.ToLower("ExecContext"), strings.ToLower(queryType), strings.ToLower(table)))
 	res, err := db.Interface.ExecContext(ctx, query, args...)
-	timer.ObserveDuration()
-
-	return res, err
-}
-func ToMap(rows *sql.Rows, err error) ([]map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	timer.ObserveDuration()
+	return res, nil
+}
+func ToMap(rows *sql.Rows, err error) ([]map[string]interface{}, error) {
 	defer rows.Close()
+	if err != nil {
+		return nil, err
+	}
 
 	columnNames, err := rows.Columns()
 	if err != nil {
@@ -322,190 +337,27 @@ func (db *database) QueryContext(ctx context.Context, query string, args ...any)
 		debugLog(query)
 		// dump.This(args)
 	}
-	if db.metrics == nil {
+	if db.metrics == nil || db.metrics.QueryHV == nil {
 		return db.Interface.QueryContext(ctx, query, args...)
 	}
 	queryType, table := extractQueryInfo(query)
-	timer := prometheus.NewTimer(db.metrics.QueryHV.WithLabelValues(db.DbName, "QueryContext", queryType, table))
+	timer := prometheus.NewTimer(db.metrics.QueryHV.WithLabelValues(db.connectionName, strings.ToLower("QueryContext"), strings.ToLower(queryType), strings.ToLower(table)))
 	rows, err := db.Interface.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
 	timer.ObserveDuration()
-
-	return rows, err
+	return rows, nil
 }
 
-type Schema struct {
-	pk            *int64
-	pkName        string
-	createdAtName string
-	updatedAtName string
-	columnOptions map[string]int
-	fillable      []string
-	table         string
-	valueMap      map[string]any
-	beforeWrite   []func(m Model) error
-	afterRead     []func(m Model) error
-}
-
-const (
-	_ = 1 << iota
-	PK
-	NoColumn
-	CreatedAt
-	UpdatedAt
-	//TODO: can we specify json stuff in here, so it adds a callback to our beforewrite hooks.
-)
-
-func NewSchema(table string, columns ...any) *Schema {
-	if len(columns) < 2 {
-		panic("you didn't pass any columns in NewSchema call")
+func Insert(obj Record) (sql.Result, error) {
+	schema, err := obj.SequelRecordSpec().intoInternalRepr()
+	if err != nil {
+		return nil, err
 	}
-	s := &Schema{
-		columnOptions: map[string]int{},
-		fillable:      []string{},
-		table:         table,
-		valueMap:      map[string]any{},
-	}
-	return s.columns(columns...)
-}
-
-type ColumnSpec struct {
-	Name string
-	Type reflect.Type
-	IsPK bool
-}
-
-func (s *Schema) GetColumns() (string, []ColumnSpec) {
-	var specs []ColumnSpec
-	for _, fil := range s.fillable {
-		var isPK bool
-		if s.columnOptions[fil]&PK == PK {
-			isPK = true
-		}
-		specs = append(specs, ColumnSpec{
-			Name: fil,
-			Type: reflect.TypeOf(s.valueMap[fil]).Elem(),
-			IsPK: isPK,
-		})
-	}
-
-	return s.table, specs
-}
-
-func (s *Schema) columns(kvs ...any) *Schema {
-	var i int
-	for i < len(kvs) {
-		if _, isString := kvs[i].(string); isString {
-			columnName := kvs[i].(string)
-			if len(kvs) <= i+1 {
-				panic("Columns should be in form of <column name> <pointer> <options which can be omitted>")
-			}
-			pointer := kvs[i+1]
-			s.valueMap[columnName] = pointer
-
-			if len(kvs) <= i+2 {
-				s.fillable = append(s.fillable, columnName)
-				break
-			}
-			if _, isInt := kvs[i+2].(int); isInt { // if it has some options
-				option := kvs[i+2].(int)
-				s.columnOptions[columnName] = option
-				if option&PK == PK {
-					s.pk = pointer.(*int64)
-				}
-
-				if option&PK == PK {
-					s.pkName = columnName
-				}
-
-				if option&CreatedAt == CreatedAt {
-					s.createdAtName = columnName
-				}
-				if option&UpdatedAt == UpdatedAt {
-					s.updatedAtName = columnName
-				}
-
-				if (option&PK != PK) && (option&NoColumn != NoColumn) {
-					s.fillable = append(s.fillable, columnName)
-				}
-				i += 3
-			} else {
-				s.fillable = append(s.fillable, columnName)
-				i += 2
-			}
-			continue
-		}
-	}
-
-	if s.createdAtName == "" {
-		if s.valueMap["created_at"] != nil {
-			s.createdAtName = "created_at"
-		}
-	}
-
-	if s.updatedAtName == "" {
-		if s.valueMap["updated_at"] != nil {
-			s.updatedAtName = "updated_at"
-		}
-	}
-	if s.pk == nil {
-		if s.valueMap["id"] != nil {
-			if _, isIntPtr := s.valueMap["id"].(*int64); isIntPtr {
-				s.pk = s.valueMap["id"].(*int64)
-			}
-		}
-		idIndex := 0
-		for i, fil := range s.fillable {
-			if fil == "id" {
-				idIndex = i
-			}
-		}
-		s.pkName = "id"
-
-		s.fillable = append(s.fillable[:idIndex], s.fillable[idIndex+1:]...)
-
-	}
-
-	return s
-}
-
-func (s *Schema) BeforeWrite(fs ...func(m Model) error) *Schema {
-	s.beforeWrite = append(s.beforeWrite, fs...)
-	return s
-}
-
-func (s *Schema) AfterRead(fs ...func(m Model) error) *Schema {
-	s.afterRead = append(s.afterRead, fs...)
-
-	return s
-}
-
-func (s *Schema) Validate() error {
-	if s.table == "" {
-		return errors.Newf("No table has been defined")
-	}
-	if len(s.fillable) < 1 {
-		return errors.Newf("No fillables defined for model of table %s", s.table)
-	}
-	if s.pk == nil {
-		return errors.Newf("No primary key pointer was set for model of table %s", s.table)
-	}
-
-	if len(s.valueMap) == 0 {
-		return errors.Newf("no field mapping defined for model of table %s", s.table)
-	}
-	//TODO(amirreza): optional reflection check for validity of types.
-
-	return nil
-}
-
-type Model interface {
-	Schema() *Schema
-}
-
-func Insert(db Interface, obj Model) (sql.Result, error) {
-	schema := obj.Schema()
-	if err := schema.Validate(); err != nil {
-		return nil, errors.Wrap(err, "invalid schema")
+	db := connections[schema.connectionName]
+	if db == nil {
+		return nil, errors.Newf("no connection %s found for model %T", schema.connectionName, obj)
 	}
 	for _, bi := range schema.beforeWrite {
 		err := bi(obj)
@@ -513,12 +365,12 @@ func Insert(db Interface, obj Model) (sql.Result, error) {
 			return nil, errors.Wrap(err, "error in running before insert hook %T", obj)
 		}
 	}
-	schema = obj.Schema()
+	schema, _ = obj.SequelRecordSpec().intoInternalRepr()
 	table := schema.table
 	columns := schema.fillable
 	values := []any{}
 	for _, col := range columns {
-		values = append(values, schema.valueMap[col])
+		values = append(values, getColumnWriteValue(schema, col))
 	}
 	placeholders := strings.Repeat("?,", len(columns))
 	placeholders = placeholders[:len(placeholders)-1]
@@ -529,6 +381,7 @@ func Insert(db Interface, obj Model) (sql.Result, error) {
 	)
 	if isDebug(db) {
 		debugLog(query)
+		// dump.This(values)
 		// dump.This(obj)
 	}
 	return db.Exec(
@@ -537,19 +390,50 @@ func Insert(db Interface, obj Model) (sql.Result, error) {
 	)
 }
 
-// TODO: make this to accept an array for bulk save.
-func Save[T Model](db Interface, objs ...T) error {
+func getColumnWriteValue(schema *recordSpec, col string) any {
+	value := schema.valueMap[col]
+	if col == schema.createdAtName {
+		if schema.valueMap[col] == nil {
+			value = "CURRENT_TIMESTAMP"
+		} else {
+			t, isTime := schema.valueMap[col].(time.Time)
+			if !isTime || t.IsZero() {
+				value = "CURRENT_TIMESTAMP"
+			} else {
+				value = t
+			}
+
+		}
+	}
+	if col == schema.updatedAtName {
+		if schema.valueMap[col] == nil {
+			value = "CURRENT_TIMESTAMP"
+		} else {
+			t, isTime := schema.valueMap[col].(time.Time)
+			if !isTime || t.IsZero() {
+				value = "CURRENT_TIMESTAMP"
+			} else {
+				value = t
+			}
+		}
+	}
+
+	return value
+}
+
+func Save[T Record](objs ...T) error {
 	if len(objs) < 1 {
 		return errors.New("you need to pass at least one model to save.")
 	}
-	schema := objs[0].Schema()
-	if err := schema.Validate(); err != nil {
-		return errors.Wrap(err, "invalid schema")
+	schema, err := objs[0].SequelRecordSpec().intoInternalRepr()
+	if err != nil {
+		return errors.Wrap(err, "cannot get internal schema from record")
 	}
-	// if schema.pk == nil || *schema.pk == 0 {
-	// 	_, err := Insert(db, objs[0]) //TODO
-	// 	return err
-	// }
+	db := connections[schema.connectionName]
+	if db == nil {
+		return errors.Newf("no connection %s found for model %T", schema.connectionName, objs[0])
+	}
+
 	for _, obj := range objs {
 		for _, bi := range schema.beforeWrite {
 			err := bi(obj)
@@ -559,7 +443,7 @@ func Save[T Model](db Interface, objs ...T) error {
 		}
 	}
 
-	schema = objs[0].Schema()
+	schema, _ = objs[0].SequelRecordSpec().intoInternalRepr()
 	table := schema.table
 	columns := schema.fillable
 	values := []any{}
@@ -573,12 +457,18 @@ func Save[T Model](db Interface, objs ...T) error {
 			return fmt.Errorf("unsupported database '%s' for generating save query", getDriver(db))
 		}
 	}
+	if schema.updatedAtName != "" {
+		updatePairs = append(updatePairs, fmt.Sprintf("%s=CURRENT_TIMESTAMP", schema.updatedAtName))
+	}
 
 	var valuePlaceholders []string
 	for _, obj := range objs {
-		thisSchema := obj.Schema()
+		thisSchema, err := obj.SequelRecordSpec().intoInternalRepr()
+		if err != nil {
+			return errors.Wrap(err, "error in turning RecordSpec into internal representation for table: %s", obj.SequelRecordSpec().Table)
+		}
 		for _, col := range schema.fillable {
-			values = append(values, thisSchema.valueMap[col])
+			values = append(values, getColumnWriteValue(thisSchema, col))
 		}
 		placeholders := strings.Repeat("?,", len(schema.fillable))
 		placeholders = placeholders[:len(placeholders)-1]
@@ -588,7 +478,6 @@ func Save[T Model](db Interface, objs ...T) error {
 		values = append(values, schema.pk)
 	}
 	var res sql.Result
-	var err error
 	if getDriver(db) == "mysql" {
 		query := fmt.Sprintf(`INSERT INTO %s (%s) VALUES %s ON DUPLICATE KEY UPDATE %s`,
 			table,
@@ -598,9 +487,9 @@ func Save[T Model](db Interface, objs ...T) error {
 		)
 		if isDebug(db) {
 			debugLog(query)
-			for _, obj := range objs {
-				dump.This(obj)
-			}
+			// for _, obj := range objs {
+			// 	dump.This(obj)
+			// }
 		}
 		res, err = db.Exec(
 			query,
@@ -615,9 +504,10 @@ func Save[T Model](db Interface, objs ...T) error {
 		)
 		if isDebug(db) {
 			debugLog(query)
-			// for _, obj := range objs {
-			// 	dump.This(obj)
-			// }
+			for _, obj := range objs {
+				fmt.Printf(">>>>> %+v\n", obj)
+				// dump.This(obj)
+			}
 		}
 		res, err = db.Exec(
 			query,
@@ -641,33 +531,29 @@ func Save[T Model](db Interface, objs ...T) error {
 	return nil
 }
 
-func Delete(db *database, m Model) (sql.Result, error) {
-	schema := m.Schema()
+func Delete(m Record) (sql.Result, error) {
+	schema, err := m.SequelRecordSpec().intoInternalRepr()
+	if err != nil {
+		return nil, err
+	}
+	db := connections[schema.connectionName]
+	if db == nil {
+		return nil, errors.Newf("no connection %s found for model %T", schema.connectionName, m)
+	}
 	pkName := schema.pkName
 	pkValue := schema.valueMap[pkName]
 	return db.Exec(fmt.Sprintf("DELETE FROM %s WHERE %s=?", schema.table, pkName), pkValue)
 }
 
 type pointer[T any] interface {
-	Schema() *Schema
+	SequelRecordSpec() RecordSpec
 	*T
 }
 
-// func Query[M any, T Queryable[M]]() {
-// 	var m M
-// 	s := &m
-// 	fmt.Printf("%T\n", m)
-// 	fmt.Printf("%T\n", s)
-// }
-
-func Query[M any, T pointer[M]](db *database, q string, args ...any) ([]T, error) {
-	if isDebug(db) {
-		fmt.Printf("[Sql-DBG] %s\n", q)
-		// dump.This(args)
-	}
-	rows, err := db.Query(q, args...)
+func Scan[M any, T pointer[M]](rows *sql.Rows, err error) ([]T, error) {
+	defer rows.Close()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot scan from rows since we have an error: %w", err)
 	}
 	columns, err := rows.Columns()
 
@@ -678,10 +564,20 @@ func Query[M any, T pointer[M]](db *database, q string, args ...any) ([]T, error
 		s := T(&m)
 		values := []any{}
 		for _, col := range columns {
-			values = append(values, s.Schema().valueMap[col])
+			internal, err := s.SequelRecordSpec().intoInternalRepr()
+			if err != nil {
+				return nil, errors.Wrap(err, "error in converting to internal repr")
+			}
+			values = append(values, internal.valueMap[col])
 		}
-		rows.Scan(values...)
-		thisSchema := s.Schema()
+		err := rows.Scan(values...)
+		if err != nil {
+			return nil, errors.Wrap(err, "error in scanning to model of table %s", s.SequelRecordSpec().Table)
+		}
+		thisSchema, err := s.SequelRecordSpec().intoInternalRepr()
+		if err != nil {
+			return nil, errors.Wrap(err, "error in turning into internal repr")
+		}
 		for _, ar := range thisSchema.afterRead {
 			err := ar(s)
 			if err != nil {
@@ -692,4 +588,24 @@ func Query[M any, T pointer[M]](db *database, q string, args ...any) ([]T, error
 	}
 
 	return records, nil
+}
+
+func Query[M any, T pointer[M]](q string, args ...any) ([]T, error) {
+	var m M
+	s := T(&m)
+	internal, err := s.SequelRecordSpec().intoInternalRepr()
+	if err != nil {
+		return nil, err
+	}
+	connectionName := internal.connectionName
+	db := connections[connectionName]
+	if db == nil {
+		return nil, errors.Newf("no connection %s found for model %T", connectionName, m)
+	}
+	rows, err := db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return Scan[M, T](rows, err)
 }

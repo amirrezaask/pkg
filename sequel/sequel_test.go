@@ -2,6 +2,7 @@ package sequel
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -18,12 +19,16 @@ type InvoiceWithPK struct {
 	Status string
 }
 
-func (i *InvoiceWithPK) SqlSchema() *Schema {
-	return NewSchema("invoice",
-		"id", &i.Id, PK,
-		"user", &i.User,
-		"status", &i.Status,
-	)
+func (i *InvoiceWithPK) SequelRecordSpec() RecordSpec {
+	return RecordSpec{
+		Connection: "testconnection",
+		Table:      "invoice",
+		Columns: []Column{
+			{Name: "id", Ptr: &i.Id, Options: PK},
+			{Name: "user", Ptr: &i.User},
+			{Name: "status", Ptr: &i.Status},
+		},
+	}
 }
 
 type InvoiceInferPK struct {
@@ -32,31 +37,38 @@ type InvoiceInferPK struct {
 	Status string
 }
 
-func (i *InvoiceInferPK) SqlSchema() *Schema {
-	return NewSchema("invoice",
-		"id", &i.Id,
-		"user", &i.User,
-		"status", &i.Status,
-	)
+func (i *InvoiceInferPK) SequelRecordSpec() RecordSpec {
+	return RecordSpec{
+		Connection: "testconnection",
+		Table:      "invoice",
+		Columns: []Column{
+			{Name: "id", Ptr: &i.Id},
+			{Name: "user", Ptr: &i.User},
+			{Name: "status", Ptr: &i.Status},
+		},
+	}
 }
 
 func TestSchema(t *testing.T) {
 	t.Run("SqlSchema should set table correctly", func(t *testing.T) {
-		s := (&InvoiceWithPK{}).SqlSchema()
+		s, err := (&InvoiceWithPK{}).SequelRecordSpec().intoInternalRepr()
 		a := assert.New(t)
+		a.NoError(err)
 		a.Equal("invoice", s.table)
 	})
 
 	t.Run("SqlSchema should set columns correctly", func(t *testing.T) {
-		s := (&InvoiceWithPK{}).SqlSchema()
+		s, err := (&InvoiceWithPK{}).SequelRecordSpec().intoInternalRepr()
 		a := assert.New(t)
+		a.NoError(err)
 		a.Len(s.valueMap, 3)
 		a.Len(s.fillable, 2)
 	})
 
 	t.Run("should infer primary key correctly", func(t *testing.T) {
-		s := (&InvoiceInferPK{}).SqlSchema()
+		s, err := (&InvoiceInferPK{}).SequelRecordSpec().intoInternalRepr()
 		a := assert.New(t)
+		a.NoError(err)
 		a.Len(s.valueMap, 3)
 		a.Len(s.fillable, 2)
 		a.NotNil(s.pk)
@@ -72,27 +84,72 @@ type User struct {
 	UpdatedAt *time.Time
 }
 
-func (u *User) Schema() *Schema {
-	return NewSchema("users",
-		"id", &u.ID,
-		"name", &u.Name,
-		"last_name", &u.LastName,
-		"credit", &u.Credit,
-		"created_at", &u.CreatedAt,
-		"updated_at", &u.UpdatedAt,
-	)
+func (u *User) SequelRecordSpec() RecordSpec {
+	return RecordSpec{
+		Connection: "testingconnection",
+		Table:      "users",
+		Columns: []Column{
+			{Name: "id", Ptr: &u.ID},
+			{Name: "name", Ptr: &u.Name},
+			{Name: "last_name", Ptr: &u.LastName},
+			{Name: "credit", Ptr: &u.Credit},
+			{Name: "created_at", Ptr: &u.CreatedAt},
+			{Name: "updated_at", Ptr: &u.UpdatedAt},
+		},
+	}
 }
 
-func TestDBFunctions(t *testing.T) {
-	// make this sqlite so it's simple to just run
-	db, err := New("sqlite3", "file::memory:?mode=memory&cache=shared",
-		"teleyare", ConnectionOptions{
-			PromNS:                "test",
+func TestCreatedAtUpdatedAt(t *testing.T) {
+	t.Run("when created_at and updated_at are not set they should populate automatically", func(t *testing.T) {
+		db, err := New(DataSource{
+			Driver:                "sqlite3",
+			Name:                  "testingconnection",
+			ConnectionString:      "file::memory:?mode=memory&cache=shared",
+			MetricsNamespace:      "createdat",
 			MaxOpenConnections:    50,
 			MaxIdleConnections:    50,
 			IdleConnectionTimeout: 10 * time.Second,
 			OpenConnectionTimeout: 10 * time.Second,
 		})
+
+		if err != nil {
+			panic(err)
+		}
+
+		command := createMigrationCommand(sqlite, &User{})
+		_, err = db.Exec(command)
+		if err != nil {
+			panic(err)
+		}
+
+		u := User{
+			Name:     uuid.NewString(),
+			LastName: uuid.NewString(),
+			Credit:   88,
+		}
+
+		_, err = Insert(&u)
+		if err != nil {
+			fmt.Printf("error in saving user in %s: %s\n", t.Name(), err.Error())
+			t.FailNow()
+		}
+
+	})
+
+}
+
+func TestDBFunctions(t *testing.T) {
+	// make this sqlite so it's simple to just run
+	db, err := New(DataSource{
+		Driver:                "sqlite3",
+		Name:                  "testingconnection",
+		ConnectionString:      "file::memory:?mode=memory&cache=shared",
+		MetricsNamespace:      "createdat",
+		MaxOpenConnections:    50,
+		MaxIdleConnections:    50,
+		IdleConnectionTimeout: 10 * time.Second,
+		OpenConnectionTimeout: 10 * time.Second,
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -104,7 +161,7 @@ func TestDBFunctions(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		Insert(db, &User{
+		Insert(&User{
 			Name:     uuid.NewString(),
 			LastName: uuid.NewString(),
 			Credit:   88,
@@ -115,7 +172,7 @@ func TestDBFunctions(t *testing.T) {
 		LastName: "Ask",
 		Credit:   999999,
 	}
-	_, err = Insert(db, &user)
+	_, err = Insert(&user)
 	if err != nil {
 		panic(err)
 	}
@@ -124,19 +181,19 @@ func TestDBFunctions(t *testing.T) {
 
 	// Now let's do an update
 	user.Credit += 1000
-	err = Save(db, &user)
+	err = Save(&user)
 	if err != nil {
 		panic(err)
 	}
 
 	// And now let's delete it.
-	_, err = Delete(db, &user)
+	_, err = Delete(&user)
 	if err != nil {
 		panic(err)
 	}
 
 	// Now let us get a list of all our users with almost no money and give them a promotion.
-	poorUsers, err := Query[User](db, "SELECT * FROM users WHERE credit < 100")
+	poorUsers, err := Query[User]("SELECT * FROM users WHERE credit < 100")
 	if err != nil {
 		panic(err)
 	}
@@ -145,7 +202,7 @@ func TestDBFunctions(t *testing.T) {
 		user.Credit += 1000000
 	}
 	// and now let's do a bulk update on our sequel.
-	err = Save(db, poorUsers...)
+	err = Save(poorUsers...)
 	if err != nil {
 		panic(err)
 	}
@@ -160,44 +217,58 @@ func TestDBFunctions(t *testing.T) {
 }
 
 type Invoice struct {
-	Id         int64
-	User       int64
-	Target     sql.NullInt64
-	TargetType string
-	Amount     int64
-	Metadata   sql.NullString
-	Status     string
-	Discount   sql.NullInt64
-	Voucher    sql.NullString
-	Payment    string
-	Debt       int
-	Uuid       string
-	CreatedAt  string
-	UpdateAt   sql.NullString
+	Id          int64
+	User        int64
+	Target      sql.NullInt64
+	TargetType  string
+	Amount      int64
+	Metadata    sql.NullString
+	MetadataMap map[string]any
+	Status      string
+	Discount    sql.NullInt64
+	Voucher     sql.NullString
+	Payment     string
+	Debt        int
+	Uuid        string
+	CreatedAt   string
+	UpdateAt    sql.NullString
 }
 
 // To make sure that Schema has no errors and everything is of correct type.
-var _ = (&Invoice{}).Schema().Validate()
+var _ = (&Invoice{}).SequelRecordSpec().Validate()
 
-func (i *Invoice) Schema() *Schema {
-	return NewSchema("invoice",
-		"id", &i.Id,
-		"user", &i.User,
-		"target", &i.Target,
-		"target_type", &i.TargetType,
-		"amount", &i.Amount,
-		"metadata", &i.Metadata,
-		"status", &i.Status,
-		"discount", &i.Discount,
-		"payment", &i.Payment,
-		"voucher", &i.Voucher,
-		"debt", &i.Debt,
-		"uuid", &i.Uuid,
-		"created_at", &i.CreatedAt,
-		"update_at", &i.UpdateAt,
-	)
+func (i *Invoice) SequelRecordSpec() RecordSpec {
+	return RecordSpec{
+		Connection: "financial",
+		Table:      "invoice",
+		Columns: []Column{
+			{Name: "id", Ptr: &i.Id},
+			{Name: "user", Ptr: &i.User},
+			{Name: "target", Ptr: &i.Target},
+			{Name: "target_type", Ptr: &i.TargetType},
+			{Name: "amount", Ptr: &i.Amount},
+			{Name: "metadata", Ptr: &i.Metadata},
+			{Name: "status", Ptr: &i.Status},
+			{Name: "discount", Ptr: &i.Discount},
+			{Name: "payment", Ptr: &i.Payment},
+			{Name: "voucher", Ptr: &i.Voucher},
+			{Name: "debt", Ptr: &i.Debt},
+			{Name: "uuid", Ptr: &i.Uuid},
+			{Name: "created_at", Ptr: &i.CreatedAt},
+			{Name: "update_at", Ptr: &i.UpdateAt, Options: UpdatedAt},
+		},
+		BeforeWrite: []BeforeWriteHook{
+			func(m Record) error {
+				invoice := m.(*Invoice)
+				invoice.MetadataMap = map[string]any{}
+				if !invoice.Metadata.Valid {
+					return nil
+				}
+				return json.Unmarshal([]byte(invoice.Metadata.String), &invoice.MetadataMap)
+			},
+		},
+	}
 }
-
 func TestMigrationCommand(t *testing.T) {
 	t.Run("create migration command", func(t *testing.T) {
 		command := createMigrationCommand("sqlite3", &Invoice{})
