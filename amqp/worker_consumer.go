@@ -11,6 +11,30 @@ import (
 	"github.com/rabbitmq/amqp091-go"
 )
 
+type ConsumerConfig struct {
+	AppName              string
+	RabbitMQURI          string
+	QueueName            string
+	RoutingKey           string
+	Exchange             string
+	WorkerGoRoutineCount int
+	DeliveryHandler      func(ctx context.Context, dv amqp091.Delivery) error
+	Prefetch             int
+}
+
+func MakeConsumerFromConfig(c ConsumerConfig) func(ctx context.Context) error {
+	return MakeConsumerWithWorkers(
+		c.AppName,
+		c.RabbitMQURI,
+		c.QueueName,
+		c.RoutingKey,
+		c.Exchange,
+		c.WorkerGoRoutineCount,
+		c.DeliveryHandler,
+		c.Prefetch,
+	)
+}
+
 func MakeConsumerWithWorkers(
 	appName string,
 	rabbitMQURI string,

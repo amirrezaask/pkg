@@ -2,12 +2,11 @@ package env
 
 import (
 	"fmt"
+	"github.com/amirrezaask/pkg/must"
+	"github.com/amirrezaask/pkg/set"
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/amirrezaask/go-std/must"
-	"github.com/amirrezaask/go-std/set"
 
 	"github.com/joho/godotenv"
 )

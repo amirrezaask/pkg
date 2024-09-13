@@ -3,9 +3,8 @@ package kv
 import (
 	"context"
 	"fmt"
+	"github.com/amirrezaask/pkg/errors"
 	"time"
-
-	"github.com/amirrezaask/go-std/errors"
 
 	"github.com/redis/go-redis/v9"
 )

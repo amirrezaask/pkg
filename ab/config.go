@@ -2,8 +2,7 @@ package ab
 
 import (
 	"fmt"
-
-	"github.com/amirrezaask/go-std/set"
+	"github.com/amirrezaask/pkg/set"
 )
 
 type ABConfig struct {

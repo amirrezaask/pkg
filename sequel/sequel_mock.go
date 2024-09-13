@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amirrezaask/go-std/errors"
+	"github.com/amirrezaask/pkg/errors"
 
 	_ "github.com/mattn/go-sqlite3"
 )

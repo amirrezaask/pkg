@@ -3,9 +3,8 @@ package objectstore
 import (
 	"context"
 	"io"
+	"github.com/amirrezaask/pkg/errors"
 	"time"
-
-	"github.com/amirrezaask/go-std/errors"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"

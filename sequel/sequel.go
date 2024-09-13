@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amirrezaask/go-std/errors"
+	"github.com/amirrezaask/pkg/errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -34,6 +34,10 @@ type Interface interface {
 	Begin() (*sql.Tx, error)
 	Driver() driver.Driver
 	Close() error
+	SetConnMaxLifetime(d time.Duration)
+	SetConnMaxIdleTime(d time.Duration)
+	SetMaxIdleConns(int)
+	SetMaxOpenConns(int)
 }
 
 type DataSource struct {
@@ -94,6 +98,10 @@ func fromTestConnection(conn *sql.DB, kind string) *database {
 	return &database{
 		Interface: conn,
 	}
+}
+
+func Open(driver string, connectionString string) (Interface, error) {
+	return sql.Open(driver, connectionString)
 }
 
 func New(ds DataSource) (Interface, error) {
@@ -262,6 +270,23 @@ func debugLog(query string) {
 		caller = stack[len(stack)-2]
 	}
 	fmt.Printf("%s => %s\n\n", caller, query)
+}
+
+func (db *database) SetConnMaxLifetime(d time.Duration) {
+	db.Interface.SetConnMaxLifetime(d)
+	return
+}
+func (db *database) SetConnMaxIdleTime(d time.Duration) {
+	db.Interface.SetConnMaxIdleTime(d)
+	return
+}
+func (db *database) SetMaxIdleConns(n int) {
+	db.Interface.SetMaxIdleConns(n)
+	return
+}
+func (db *database) SetMaxOpenConns(n int) {
+	db.Interface.SetMaxOpenConns(n)
+	return
 }
 
 func (db *database) Exec(query string, args ...any) (sql.Result, error) {

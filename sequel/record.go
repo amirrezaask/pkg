@@ -2,9 +2,8 @@ package sequel
 
 import (
 	"fmt"
+	"github.com/amirrezaask/pkg/errors"
 	"reflect"
-
-	"github.com/amirrezaask/go-std/errors"
 )
 
 type Record interface {

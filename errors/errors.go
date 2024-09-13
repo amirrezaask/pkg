@@ -7,7 +7,7 @@ import (
 )
 
 func addRuntimeInfo(s *string) {
-	pc, file, line, ok := runtime.Caller(1)
+	pc, file, line, ok := runtime.Caller(2)
 	if ok && s != nil {
 		f := runtime.FuncForPC(pc)
 		*s += fmt.Sprintf(" [function='%s' file='%s' line=%d]", f.Name(), file, line)
