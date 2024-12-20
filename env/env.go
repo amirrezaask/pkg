@@ -2,14 +2,17 @@ package env
 
 import (
 	"fmt"
-	"github.com/amirrezaask/pkg/must"
-	"github.com/amirrezaask/pkg/set"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/amirrezaask/pkg/must"
+	"github.com/amirrezaask/pkg/set"
+
 	"github.com/joho/godotenv"
 )
+
+//TODO: Command to generate a list of all environment variables needed, so we can use it to generate a sample .env file.
 
 var dotEnvMap = must.Do(godotenv.Unmarshal(".env"))
 
@@ -25,7 +28,7 @@ func getEnv(key string) string {
 	return value
 }
 
-func GetEnvDefault(key, def string) string {
+func Default(key, def string) string {
 	value := getEnv(key)
 	if value == "" {
 		return def
@@ -33,7 +36,7 @@ func GetEnvDefault(key, def string) string {
 	return value
 }
 
-func GetEnvRequiredNotEmpty(key string) string {
+func RequiredNotEmpty(key string) string {
 	value := getEnv(key)
 	if value == "" {
 		if !testing.Testing() {
@@ -43,7 +46,7 @@ func GetEnvRequiredNotEmpty(key string) string {
 	return value
 }
 
-func GetEnvRequired(key string) string {
+func Required(key string) string {
 	_, osSet := os.LookupEnv(key)
 	_, dotEnvSet := dotEnvMap[key]
 	if !osSet && !dotEnvSet {

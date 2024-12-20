@@ -10,7 +10,7 @@ func This(obj any) {
 	spew.Dump(obj)
 }
 
-func Die(obj any) {
+func AndDie(obj any) {
 	spew.Dump(obj)
 	os.Exit(0)
 }

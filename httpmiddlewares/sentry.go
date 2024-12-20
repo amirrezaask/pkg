@@ -1,4 +1,4 @@
-package middlewares
+package httpmiddlewares
 
 import (
 	"net/http"
@@ -6,8 +6,8 @@ import (
 	"github.com/getsentry/sentry-go"
 )
 
-func Sentry(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func Sentry(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			r := recover()
 			if r != nil {
@@ -15,5 +15,8 @@ func Sentry(h http.HandlerFunc) http.HandlerFunc {
 				panic(r)
 			}
 		}()
-	}
+
+		h.ServeHTTP(w, r)
+
+	})
 }

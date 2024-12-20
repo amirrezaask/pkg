@@ -76,7 +76,6 @@ func NewAMQPPublisher(appName string, name string, rabbitMQURI string) Publisher
 			case p := <-a.PublishingChannel:
 				go func() {
 					timer := prometheus.NewTimer(durationHistogram.WithLabelValues(p.Exchange, p.Key))
-					timer.ObserveDuration()
 					ch, err := conn.Channel()
 					if err != nil {
 						slog.Error("cannot get amqp channel in handling publishing channel", "err", err)
@@ -91,6 +90,8 @@ func NewAMQPPublisher(appName string, name string, rabbitMQURI string) Publisher
 					})
 					if err != nil {
 						slog.Error("error in publishing into amqp", "err", err)
+					} else {
+						timer.ObserveDuration()
 					}
 				}()
 

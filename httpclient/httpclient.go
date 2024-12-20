@@ -3,6 +3,7 @@ package httpclient
 import (
 	"fmt"
 	"net/http"
+	"path"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -37,7 +38,14 @@ type transport struct {
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	startTime := time.Now()
 	resp, err := t.stdTransport.RoundTrip(req)
-	t.httpRequestDurationH.WithLabelValues(req.Method, req.URL.Host, req.URL.Path, fmt.Sprint(resp.StatusCode)).Observe(time.Since(startTime).Seconds())
+
+	if t.httpRequestDurationH != nil {
+		statusCode := -1
+		if resp != nil {
+			statusCode = resp.StatusCode
+		}
+		t.httpRequestDurationH.WithLabelValues(req.Method, req.URL.Host, path.Dir(req.URL.Path), fmt.Sprint(statusCode)).Observe(time.Since(startTime).Seconds())
+	}
 
 	return resp, err
 }

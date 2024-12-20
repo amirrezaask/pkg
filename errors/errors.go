@@ -6,6 +6,16 @@ import (
 	"runtime"
 )
 
+func getRuntimeInfo() string {
+	pc, file, line, ok := runtime.Caller(2)
+	if ok {
+		f := runtime.FuncForPC(pc)
+		return fmt.Sprintf("function='%s' file='%s' line=%d", f.Name(), file, line)
+	}
+
+	return ""
+}
+
 func addRuntimeInfo(s *string) {
 	pc, file, line, ok := runtime.Caller(2)
 	if ok && s != nil {

@@ -1,9 +1,17 @@
 package cache
 
-type Cacher interface {
-	Remember(key string, value any) error
-	Get(key string) (any, error)
-}
+import (
+	"context"
+	"errors"
+	"time"
+)
 
-type CacheSequel struct{}
-type CacheRedis struct{}
+var (
+	ErrNoEntry      = errors.New("no entry")
+	ErrEntryExpired = errors.New("entry expired")
+)
+
+type Cacher interface {
+	Remember(ctx context.Context, key string, value any, ttl time.Duration) error
+	Get(ctx context.Context, key string) (any, error)
+}

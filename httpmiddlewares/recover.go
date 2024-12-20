@@ -1,12 +1,12 @@
-package middlewares
+package httpmiddlewares
 
 import (
 	"log/slog"
 	"net/http"
 )
 
-func Recover(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func Recover(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			r := recover()
 			if r != nil {
@@ -17,5 +17,6 @@ func Recover(h http.HandlerFunc) http.HandlerFunc {
 				}
 			}
 		}()
-	}
+		h.ServeHTTP(w, r)
+	})
 }
