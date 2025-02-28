@@ -19,6 +19,7 @@ import (
 )
 
 type QueryExecerContext interface {
+	Driver() driver.Driver
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -48,6 +49,8 @@ type DB struct {
 	errorCounter *prometheus.CounterVec
 	isDebug      bool
 }
+
+var _ QueryExecerContext = &DB{}
 
 type Tx struct {
 	tx           *sql.Tx
@@ -353,8 +356,6 @@ func (db *DB) QueryRowContext(ctx context.Context, query string, args ...any) *s
 	db.maybeObserveDuration(maybeTimer)
 	return row
 }
-
-func (db *DB) getConfig() DBConfig { return db.cfg }
 
 func (db *DB) Begin() (*Tx, error) {
 	return db.BeginTx(context.Background(), nil)

@@ -1,6 +1,7 @@
 package sequel
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
@@ -34,14 +35,14 @@ func extractQueryInfo(query string) (queryType, tableName string) {
 					return operation, tableName
 				}
 			}
-			slog.Warn("error in categorizing query table", "query", query)
+			slog.Info("error in categorizing query table", "query", query)
 			return operation, "unknown"
 		} else {
-			slog.Warn("error in categorizing query operation", "query", query)
+			slog.Info("error in categorizing query operation", "query", query)
 			return "unknown", "unknown"
 		}
 	} else {
-		slog.Warn("error in categorizing query", "query", query)
+		slog.Info("error in categorizing query", "query", query)
 		return "unknown", "unknown"
 	}
 }
@@ -122,6 +123,10 @@ func dbErrText(err error) string {
 		errText = "mysql_invalid_connection"
 	} else if errors.Is(err, new(mysql.MySQLError)) {
 		errText = "mysql_error"
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		errText = "ctx_deadline"
+	} else if errors.Is(err, context.Canceled) {
+		errText = "ctx_cancel"
 	} else {
 		slog.Warn("unhandled database error conversion", "err", err)
 		errText = "unhandled"

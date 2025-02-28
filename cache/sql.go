@@ -11,12 +11,12 @@ import (
 )
 
 type sqlCacher struct {
-	*sequel.DB
+	sequel.QueryExecerContext
 	namespace string
 	driver    string
 }
 
-func NewSqlCacher(ctx context.Context, db *sequel.DB, cacheNamespace string) (Cacher, error) {
+func NewSqlCacher(ctx context.Context, db sequel.QueryExecerContext, cacheNamespace string) (Cacher, error) {
 	//migrate database if needed.
 	driver := fmt.Sprintf("%T", db.Driver()) // to not import sql drivers here as well.
 
@@ -52,9 +52,9 @@ func NewSqlCacher(ctx context.Context, db *sequel.DB, cacheNamespace string) (Ca
 	}
 
 	return &sqlCacher{
-		DB:        db,
-		namespace: cacheNamespace,
-		driver:    driver,
+		QueryExecerContext: db,
+		namespace:          cacheNamespace,
+		driver:             driver,
 	}, nil
 }
 

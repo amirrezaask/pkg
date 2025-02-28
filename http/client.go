@@ -1,4 +1,4 @@
-package httpclient
+package http
 
 import (
 	"fmt"
@@ -50,7 +50,7 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, err
 }
 
-func New(promNS string, name string, timeout time.Duration) *http.Client {
+func NewClient(promNS string, name string, timeout time.Duration) *Client {
 	t := &transport{
 		stdTransport: http.DefaultTransport,
 		httpRequestDurationH: promauto.NewHistogramVec(prometheus.HistogramOpts{
